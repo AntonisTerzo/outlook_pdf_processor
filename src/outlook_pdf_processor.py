@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 import PyPDF2
 import threading
+import ctypes
 
 # List of cities to search for
 CITIES = [
@@ -253,7 +254,6 @@ class OutlookProcessorGUI:
 
         # Get user's display name from Windows
         try:
-            import ctypes
             GetUserNameEx = ctypes.windll.secur32.GetUserNameExW
             NameDisplay = 3
 
@@ -264,10 +264,15 @@ class OutlookProcessorGUI:
             GetUserNameEx(NameDisplay, nameBuffer, size)
 
             username = nameBuffer.value
+
+            # Trim company name: "Last, First / Company" -> "Last, First"
+            if username and '/' in username:
+                username = username.split('/')[0].strip()
+
             # If full name not available, fall back to USERNAME
             if not username:
                 username = os.environ.get('USERNAME', 'User')
-        except:
+        except Exception:
             # Fallback to regular username if display name fails
             username = os.environ.get('USERNAME', 'User')
 
@@ -280,16 +285,16 @@ class OutlookProcessorGUI:
         )
         welcome_label.pack(pady=20)
 
-        # Start Button - Light Blue with border
+        # Start Button - Light Blue with border (smaller size)
         self.start_button = tk.Button(
             root,
             text="Start Task_1",
             command=self.start_task,
-            font=("Arial", 14, "bold"),
+            font=("Arial", 12, "bold"),
             bg="#5DADE2",  # Light blue
             fg="white",
-            width=20,
-            height=2,
+            width=15,
+            height=1,
             relief="raised",  # Gives it a raised 3D effect
             borderwidth=3,    # Makes the border thicker
             cursor="hand2"    # Changes cursor to hand on hover
