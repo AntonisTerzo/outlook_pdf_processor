@@ -13,7 +13,7 @@ import ctypes
 CITIES = [
     "TIANJIN", "SHENYANG", "AMMAN", "WUHAN", "XIAN", "SUZHOU",
     "CAIRO", "HOLON", "ABIDJAN", "ANSAN-SI", "BRAMALEA", "BRIDGEPORT",
-    "DELTA", "DORVAL", "EAST TAMAKI", "FOSHAN", "GUANGZOU", "HAYWARD",
+    "DELTA", "DORVAL", "EAST TAMAKI", "FOSHAN", "GUANGZHOU", "HAYWARD",
     "KOWLOON", "MONTEVIDEO", "MUANG CHONBURI", "SIHEUNG", "SINGAPUR",
     "TROY", "TULLAMARINE"
 ]
@@ -335,8 +335,12 @@ class OutlookProcessorGUI:
             processed, manual = run_pdf_processor(self.log)
 
             if processed > 0 or manual > 0:
+                # Open Desktop folder where files are saved
+                desktop = Path.home() / "Desktop"
+                os.startfile(desktop)
+
                 messagebox.showinfo(
-                    "Success", f"Processing complete!\n{processed} files processed.\n{manual} need manual review.")
+                    "Success", f"Processing complete!\n{processed} files processed.\n{manual} need manual review.\n\nFolder opened for you to work with the files.")
             else:
                 messagebox.showwarning("No Files", "No files were processed.")
 
