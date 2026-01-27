@@ -12,7 +12,7 @@ import threading
 CITIES = [
     "TIANJIN", "SHENYANG", "AMMAN", "WUHAN", "XIAN", "SUZHOU",
     "CAIRO", "HOLON", "ABIDJAN", "ANSAN-SI", "BRAMALEA", "BRIDGEPORT",
-    "DELTA", "DORVAL", "EAST TAMAKI", "FOSHAN", "GUANGZHOU", "HAYWARD",
+    "DELTA", "DORVAL", "EAST TAMAKI", "FOSHAN", "GUANGZOU", "HAYWARD",
     "KOWLOON", "MONTEVIDEO", "MUANG CHONBURI", "SIHEUNG", "SINGAPUR",
     "TROY", "TULLAMARINE"
 ]
@@ -251,9 +251,25 @@ class OutlookProcessorGUI:
         self.root.title("Outlook PDF Processor")
         self.root.geometry("600x400")
 
-        # Get username from environment variable
-        # USERNAME works on Windows 11
-        username = os.environ.get('USERNAME', 'User')
+        # Get user's display name from Windows
+        try:
+            import ctypes
+            GetUserNameEx = ctypes.windll.secur32.GetUserNameExW
+            NameDisplay = 3
+
+            size = ctypes.pointer(ctypes.c_ulong(0))
+            GetUserNameEx(NameDisplay, None, size)
+
+            nameBuffer = ctypes.create_unicode_buffer(size.contents.value)
+            GetUserNameEx(NameDisplay, nameBuffer, size)
+
+            username = nameBuffer.value
+            # If full name not available, fall back to USERNAME
+            if not username:
+                username = os.environ.get('USERNAME', 'User')
+        except:
+            # Fallback to regular username if display name fails
+            username = os.environ.get('USERNAME', 'User')
 
         # Welcome Message
         welcome_label = tk.Label(
