@@ -47,7 +47,7 @@ Or you can use the outlook_pdf_processor.exe file.
 
 ## How it works (high level)
 
-1. Connects to Outlook using `pywin32` COM interfaces and opens the specified folder.
+1. Connects to Outlook using `pywin32` MAPPI interfaces and opens the specified folder.
 2. Iterates over messages and downloads PDF attachments to ``.
 3. Extracts text from each PDF using `PyPDF2`.
 4. Uses pattern matching (regex) or simple parsing to locate a **city name** and a **packing list number** inside the extracted text.
