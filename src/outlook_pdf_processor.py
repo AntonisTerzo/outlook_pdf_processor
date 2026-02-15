@@ -5,7 +5,7 @@ import pythoncom
 import os
 import re
 from pathlib import Path
-import PyPDF2
+from pypdf import PdfReader
 import threading
 import ctypes
 
@@ -13,7 +13,7 @@ import ctypes
 CITIES = [
     "TIANJIN", "SHENYANG", "AMMAN", "WUHAN", "XIAN", "SUZHOU",
     "CAIRO", "HOLON", "ABIDJAN", "ANSAN-SI", "BRAMALEA", "BRIDGEPORT",
-    "DELTA", "DORVAL", "EAST TAMAKI", "FOSHAN", "GUANGZHOU", "HAYWARD",
+    "DELTA", "DORVAL", "EAST TAMAKI", "FOSHAN", "GUANGZOU", "HAYWARD",
     "KOWLOON", "MONTEVIDEO", "MUANG CHONBURI", "SIHEUNG", "SINGAPUR",
     "TROY", "TULLAMARINE"
 ]
@@ -27,7 +27,7 @@ def extract_info_from_pdf(pdf_path):
     """
     try:
         with open(pdf_path, 'rb') as file:
-            pdf_reader = PyPDF2.PdfReader(file)
+            pdf_reader = PdfReader(file)
             text = ""
             for page in pdf_reader.pages:
                 text += page.extract_text()
@@ -129,8 +129,12 @@ def run_pdf_processor(log_func=print):
     pythoncom.CoInitialize()
 
     try:
-        desktop = Path.home() / "Desktop"
-        temp_folder = desktop / "temp_outlook_downloads"
+        # Create PDF extraction folder in Downloads
+        downloads = Path.home() / "Downloads"
+        pdf_folder = downloads / "pdf extraction"
+        pdf_folder.mkdir(exist_ok=True)
+
+        temp_folder = pdf_folder / "temp_outlook_downloads"
         temp_folder.mkdir(exist_ok=True)
 
         log_func("Attempting to connect to Outlook...")
@@ -144,37 +148,37 @@ def run_pdf_processor(log_func=print):
         namespace = outlook.GetNamespace("MAPI")
         log_func("✓ Successfully connected to Outlook!")
 
-        # Find test folder
+        # Find Task_1 folder
         inbox = namespace.GetDefaultFolder(6)
-        test_folder = None
+        task_folder = None
 
         for folder in inbox.Folders:
-            if folder.Name.lower() == "test":
-                test_folder = folder
+            if folder.Name.lower() == "task_1":
+                task_folder = folder
                 break
 
-        if not test_folder:
-            log_func("Could not find 'test' folder in Inbox.")
+        if not task_folder:
+            log_func("Could not find 'Task_1' folder in Inbox.")
             log_func("Searching in all folders...")
             for folder in namespace.Folders:
                 for subfolder in folder.Folders:
-                    if subfolder.Name.lower() == "test":
-                        test_folder = subfolder
+                    if subfolder.Name.lower() == "task_1":
+                        task_folder = subfolder
                         break
-                if test_folder:
+                if task_folder:
                     break
 
-        if not test_folder:
-            log_func("✗ Error: 'test' folder not found!")
+        if not task_folder:
+            log_func("✗ Error: 'Task_1' folder not found!")
             return 0, 0
 
-        log_func(f"✓ Found folder: {test_folder.Name}")
-        log_func(f"Processing {test_folder.Items.Count} emails...\n")
+        log_func(f"✓ Found folder: {task_folder.Name}")
+        log_func(f"Processing {task_folder.Items.Count} emails...\n")
 
         processed_count = 0
         manual_review_count = 0
 
-        for message in test_folder.Items:
+        for message in task_folder.Items:
             if hasattr(message, 'Attachments'):
                 for attachment in message.Attachments:
                     filename = attachment.FileName
@@ -186,7 +190,7 @@ def run_pdf_processor(log_func=print):
                         attachment.SaveAsFile(str(temp_msg_path))
 
                         msg_processed, msg_manual = process_msg_file(
-                            temp_msg_path, temp_folder, desktop, outlook, log_func)
+                            temp_msg_path, temp_folder, pdf_folder, outlook, log_func)
                         processed_count += msg_processed
                         manual_review_count += msg_manual
 
@@ -202,7 +206,7 @@ def run_pdf_processor(log_func=print):
 
                         if city and doc_number:
                             new_filename = f"{city}_{doc_number}.pdf"
-                            final_path = desktop / new_filename
+                            final_path = pdf_folder / new_filename
                             temp_path.rename(final_path)
                             log_func(f"✓ Saved as: {new_filename}")
                             processed_count += 1
@@ -216,7 +220,8 @@ def run_pdf_processor(log_func=print):
         # Final summary
         log_func("\n" + "="*60)
         log_func("Processing complete!")
-        log_func(f"✓ {processed_count} files renamed and saved to Desktop.")
+        log_func(
+            f"✓ {processed_count} files renamed and saved to Downloads/pdf extraction.")
 
         if manual_review_count > 0:
             log_func(
@@ -335,12 +340,13 @@ class OutlookProcessorGUI:
             processed, manual = run_pdf_processor(self.log)
 
             if processed > 0 or manual > 0:
-                # Open Desktop folder where files are saved
-                desktop = Path.home() / "Desktop"
-                os.startfile(desktop)
+                # Open pdf extraction folder where files are saved
+                downloads = Path.home() / "Downloads"
+                pdf_folder = downloads / "pdf extraction"
+                os.startfile(pdf_folder)
 
                 messagebox.showinfo(
-                    "Success", f"Processing complete!\n{processed} files processed.\n{manual} need manual review.\n\nFolder opened for you to work with the files.")
+                    "Success", f"Processing complete!\n{processed} files processed.\n{manual} files need MANUAL review!\n\nFolder opened for you to work with the files.")
             else:
                 messagebox.showwarning("No Files", "No files were processed.")
 
