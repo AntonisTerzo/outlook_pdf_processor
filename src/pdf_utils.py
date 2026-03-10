@@ -69,3 +69,61 @@ def extract_city_from_filename_task2(filename, cities_list):
     except Exception as e:
         print(f"Error extracting city from filename: {e}")
         return None
+
+
+def round_dimension(value_mm):
+    """
+    Convert mm to meters and round based on .5 threshold.
+    Examples:
+    - 680 -> 68.0 -> 68
+    - 555 -> 55.5 -> 56 (>= .5)
+    - 554 -> 55.4 -> 55 (< .5)
+    """
+    meters = value_mm / 10
+
+    # Get the decimal part
+    decimal_part = meters - int(meters)
+
+    if decimal_part >= 0.5:
+        return int(meters) + 1
+    else:
+        return int(meters)
+
+
+def extract_dimensions_from_pdf(pdf_path):
+    """
+    Extract dimensions from PDF under "Abmessung(MM)" column.
+    Returns list of dimension strings in format "LxWxH" (in meters, rounded).
+    Example: ["68x36x47", "55x30x40"]
+    """
+    try:
+        with open(pdf_path, 'rb') as file:
+            pdf_reader = PdfReader(file)
+            text = ""
+            for page in pdf_reader.pages:
+                text += page.extract_text()
+
+            dimensions = []
+
+            # Pattern to find dimensions in format: 680x360x470 or 680X360X470
+            dimension_pattern = r'(\d{3,4})[xX](\d{3,4})[xX](\d{3,4})'
+
+            for match in re.finditer(dimension_pattern, text):
+                length_mm = int(match.group(1))
+                width_mm = int(match.group(2))
+                height_mm = int(match.group(3))
+
+                # Convert to meters with rounding
+                length_m = round_dimension(length_mm)
+                width_m = round_dimension(width_mm)
+                height_m = round_dimension(height_mm)
+
+                # Format as "LxWxH"
+                dimension_str = f"{length_m}x{width_m}x{height_m}"
+                dimensions.append(dimension_str)
+
+            return dimensions
+
+    except Exception as e:
+        print(f"Error extracting dimensions from PDF: {e}")
+        return []

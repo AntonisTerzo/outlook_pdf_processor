@@ -1,21 +1,26 @@
 from pathlib import Path
-from collections import defaultdict
+from collections import defaultdict, Counter
 from config import TASK2_CITIES
-from pdf_utils import extract_city_from_filename_task2
+from pdf_utils import extract_city_from_filename_task2, extract_dimensions_from_pdf
 from outlook_utils import (
     connect_to_outlook, find_outlook_folder,
     process_msg_file, initialize_com, uninitialize_com
 )
+import openpyxl
+from openpyxl.styles import Font, Alignment, PatternFill
 
 
 # Track city counts for numbering
 city_counter = defaultdict(int)
 
+# Store dimensions data: {city: {file_number: [dimensions]}}
+dimensions_data = defaultdict(lambda: defaultdict(list))
+
 
 def process_pdf_task2(temp_pdf_path, output_folder, original_filename):
     """
     Process a single PDF for Task 2.
-    Extracts city from filename and renames with numbering if duplicates.
+    Extracts city from filename, extracts dimensions, and renames with numbering.
     Returns dict with 'success' and 'message' keys.
     """
     city = extract_city_from_filename_task2(original_filename, TASK2_CITIES)
@@ -25,21 +30,100 @@ def process_pdf_task2(temp_pdf_path, output_folder, original_filename):
         city_counter[city] += 1
         count = city_counter[city]
 
+        # Extract dimensions from PDF
+        dimensions = extract_dimensions_from_pdf(temp_pdf_path)
+
+        # Store dimensions for this file
+        dimensions_data[city][count] = dimensions
+
+        # Create filename: "BRASILIEN 1.pdf", "BRASILIEN 2.pdf", etc.
         new_filename = f"{city} {count}.pdf"
         final_path = output_folder / new_filename
         temp_pdf_path.rename(final_path)
 
-        return {'success': True, 'message': f"Saved as: {new_filename}"}
+        return {'success': True, 'message': f"Saved as: {new_filename} ({len(dimensions)} dimensions found)"}
     else:
         return {'success': False, 'message': f"Could not find city in filename: {original_filename}"}
 
 
+def create_excel_report(output_folder):
+    """
+    Create Excel file with dimensions grouped by city.
+    Each city gets its own sheet with files separated.
+    """
+    if not dimensions_data:
+        return None
+
+    excel_path = output_folder / "Dimensions_Report.xlsx"
+    wb = openpyxl.Workbook()
+
+    # Remove default sheet
+    if 'Sheet' in wb.sheetnames:
+        wb.remove(wb['Sheet'])
+
+    # Create a sheet for each city
+    for city in sorted(dimensions_data.keys()):
+        ws = wb.create_sheet(title=city[:31])  # Excel sheet names max 31 chars
+
+        # Header styling
+        header_fill = PatternFill(
+            start_color="4472C4", end_color="4472C4", fill_type="solid")
+        header_font = Font(bold=True, color="FFFFFF")
+
+        # Add headers
+        ws['A1'] = 'File'
+        ws['B1'] = 'Dimension'
+        ws['C1'] = 'Count'
+
+        for cell in ['A1', 'B1', 'C1']:
+            ws[cell].fill = header_fill
+            ws[cell].font = header_font
+            ws[cell].alignment = Alignment(
+                horizontal='center', vertical='center')
+
+        row = 2
+
+        # Process each file for this city
+        for file_num in sorted(dimensions_data[city].keys()):
+            dimensions_list = dimensions_data[city][file_num]
+
+            if not dimensions_list:
+                # No dimensions found
+                ws[f'A{row}'] = f"{city} {file_num}"
+                ws[f'B{row}'] = "No dimensions found"
+                ws[f'C{row}'] = 0
+                row += 1
+            else:
+                # Group and count dimensions
+                dimension_counts = Counter(dimensions_list)
+
+                # Sort by dimension for consistency
+                for dimension, count in sorted(dimension_counts.items()):
+                    ws[f'A{row}'] = f"{city} {file_num}"
+                    ws[f'B{row}'] = dimension
+                    ws[f'C{row}'] = count
+                    row += 1
+
+            # Add separator row
+            row += 1
+
+        # Auto-adjust column widths
+        ws.column_dimensions['A'].width = 25
+        ws.column_dimensions['B'].width = 20
+        ws.column_dimensions['C'].width = 10
+
+    wb.save(excel_path)
+    return excel_path
+
+
 def run_task_2(log_func=print):
     """
-    Main Task 2 logic: Download PDFs from Task_2 folder and rename by city with numbering.
+    Main Task 2 logic: Download PDFs from Task_2 folder, rename by city with numbering,
+    extract dimensions and create Excel report.
     """
-    # Reset city counter for this run
+    # Reset counters and data for this run
     city_counter.clear()
+    dimensions_data.clear()
 
     initialize_com()
 
@@ -107,6 +191,13 @@ def run_task_2(log_func=print):
                                 f"  Keeping in temp folder for manual review")
                             manual_review_count += 1
 
+        # Create Excel report with dimensions
+        if processed_count > 0:
+            log_func("\nCreating Excel report with dimensions...")
+            excel_path = create_excel_report(pdf_folder)
+            if excel_path:
+                log_func(f"✓ Excel report created: {excel_path.name}")
+
         # Final summary
         log_func("\n" + "="*60)
         log_func("Task 2 Processing complete!")
@@ -129,6 +220,8 @@ def run_task_2(log_func=print):
 
     except Exception as e:
         log_func(f"\n✗ Error: {e}")
+        import traceback
+        traceback.print_exc()
         return 0, 0
 
     finally:

@@ -8,7 +8,7 @@ A small Python utility that automates a repetitive team task: scans a specified 
 
 - Connects to Outlook (classic desktop) via MAPI using `pywin32`.
 - Downloads PDF attachments from a specified Outlook folder.
-- Extracts packing-list numbers and city names from PDF text using `PyPDF2`.
+- Extracts packing-list numbers and city names from PDF text using `PyPDF`.
 - Renames files to a consistent pattern: `{city}_{packing}.pdf`.
 - Opens the destination folder after processing so the user can access files immediately.
 
