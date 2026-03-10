@@ -14,7 +14,7 @@ TASK2_CITIES = [
     "LYMAN",
     "LYMAN ELECTRONICS",
     "PUNE",
-    "JOHANNESURG",
+    "JOHANNESBURG",
     "DALLAS",
     "BRASILIEN",
     "CHINA KRONES",
