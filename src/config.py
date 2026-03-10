@@ -1,0 +1,35 @@
+# Configuration file for Outlook PDF Processor
+
+# Task 1 Cities
+TASK1_CITIES = [
+    "TIANJIN", "SHENYANG", "AMMAN", "WUHAN", "XIAN", "SUZHOU",
+    "CAIRO", "HOLON", "ABIDJAN", "ANSAN-SI", "BRAMALEA", "BRIDGEPORT",
+    "DELTA", "DORVAL", "EAST TAMAKI", "FOSHAN", "GUANGZHOU", "HAYWARD",
+    "KOWLOON", "MONTEVIDEO", "MUANG CHONBURI", "SIHEUNG", "SINGAPUR",
+    "TROY", "TULLAMARINE"
+]
+
+# Task 2 Cities
+TASK2_CITIES = [
+    "LYMAN",
+    "LYMAN ELECTRONICS",
+    "PUNE",
+    "JOHANNESURG",
+    "DALLAS",
+    "BRASILIEN",
+    "CHINA KRONES",
+    "CHENNAI",
+    "VADODARA",
+    "BRASILIEN JOINVILLE",
+    "MALAYSIA",
+    "MALAYSIA SHA ALAM",
+    "JAPAN",
+    "JAPAN KYOTO",
+    "KOLUMBIEN",
+    "VIETNAM",
+    "WELLFORD",
+    "CHILE",
+    "PERU",
+    "ARAB. EMIRATE",
+    "MEXICO"
+]
