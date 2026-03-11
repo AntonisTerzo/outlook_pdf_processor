@@ -4,7 +4,8 @@ from config import TASK2_CITIES
 from pdf_utils import extract_city_from_filename_task2, extract_dimensions_from_pdf
 from outlook_utils import (
     connect_to_outlook, find_outlook_folder,
-    process_msg_file, initialize_com, uninitialize_com
+    process_msg_file, initialize_com, uninitialize_com,
+    create_unique_folder
 )
 import openpyxl
 from openpyxl.styles import Font, Alignment, PatternFill
@@ -43,7 +44,21 @@ def process_pdf_task2(temp_pdf_path, output_folder, original_filename):
 
         return {'success': True, 'message': f"Saved as: {new_filename} ({len(dimensions)} dimensions found)"}
     else:
-        return {'success': False, 'message': f"Could not find city in filename: {original_filename}"}
+        # Move to MANUAL REVIEW folder with unique name
+        manual_folder = output_folder / "MANUAL REVIEW"
+
+        # Create unique filename if file already exists
+        counter = 1
+        final_path = manual_folder / original_filename
+
+        while final_path.exists():
+            name_without_ext = original_filename.replace(
+                '.pdf', '').replace('.PDF', '')
+            final_path = manual_folder / f"{name_without_ext}({counter}).pdf"
+            counter += 1
+
+        temp_pdf_path.rename(final_path)
+        return {'success': False, 'message': f"Moved to MANUAL REVIEW: {final_path.name}"}
 
 
 def create_excel_report(output_folder):
@@ -128,26 +143,30 @@ def run_task_2(log_func=print):
     initialize_com()
 
     try:
-        # Create PDF extraction folder
+        # Create unique task folder
         downloads = Path.home() / "Downloads"
-        pdf_folder = downloads / "pdf extraction"
-        pdf_folder.mkdir(exist_ok=True)
+        pdf_folder = create_unique_folder(
+            downloads, "outlook_pdf_processor_task_2")
+        log_func(f"Created folder: {pdf_folder.name}")
 
-        temp_folder = pdf_folder / "temp_task2"
+        temp_folder = pdf_folder / "temp"
         temp_folder.mkdir(exist_ok=True)
+
+        manual_review_folder = pdf_folder / "MANUAL REVIEW"
+        manual_review_folder.mkdir(exist_ok=True)
 
         log_func("Task 2: Attempting to connect to Outlook...")
         outlook, namespace = connect_to_outlook()
-        log_func("✓ Successfully connected to Outlook!")
+        log_func(" Successfully connected to Outlook!")
 
         # Find Task_2 folder
         task_folder = find_outlook_folder(namespace, "Task_2")
 
         if not task_folder:
-            log_func("✗ Error: 'Task_2' folder not found!")
+            log_func(" Error: 'Task_2' folder not found!")
             return 0, 0
 
-        log_func(f"✓ Found folder: {task_folder.Name}")
+        log_func(f" Found folder: {task_folder.Name}")
         log_func(f"Processing {task_folder.Items.Count} emails...\n")
 
         processed_count = 0
@@ -183,12 +202,10 @@ def run_task_2(log_func=print):
                             temp_path, pdf_folder, filename)
 
                         if result['success']:
-                            log_func(f"✓ {result['message']}")
+                            log_func(f" {result['message']}")
                             processed_count += 1
                         else:
-                            log_func(f"⚠ {result['message']}")
-                            log_func(
-                                f"  Keeping in temp folder for manual review")
+                            log_func(f" {result['message']}")
                             manual_review_count += 1
 
         # Create Excel report with dimensions
@@ -196,17 +213,18 @@ def run_task_2(log_func=print):
             log_func("\nCreating Excel report with dimensions...")
             excel_path = create_excel_report(pdf_folder)
             if excel_path:
-                log_func(f"✓ Excel report created: {excel_path.name}")
+                log_func(f" Excel report created: {excel_path.name}")
 
         # Final summary
         log_func("\n" + "="*60)
         log_func("Task 2 Processing complete!")
-        log_func(f"✓ {processed_count} files renamed and saved.")
+        log_func(f" {processed_count} files renamed and saved.")
+        log_func(f"  Location: {pdf_folder}")
 
         if manual_review_count > 0:
             log_func(
-                f"\n⚠ WARNING: {manual_review_count} file(s) need manual review")
-            log_func(f"  Location: {temp_folder}")
+                f"\n WARNING: {manual_review_count} file(s) need manual review")
+            log_func(f"  Location: {manual_review_folder}")
 
         log_func("="*60)
 
@@ -216,13 +234,13 @@ def run_task_2(log_func=print):
             if not remaining_files:
                 temp_folder.rmdir()
 
-        return processed_count, manual_review_count
+        return processed_count, manual_review_count, pdf_folder
 
     except Exception as e:
-        log_func(f"\n✗ Error: {e}")
+        log_func(f"\n Error: {e}")
         import traceback
         traceback.print_exc()
-        return 0, 0
+        return 0, 0, None
 
     finally:
         uninitialize_com()
