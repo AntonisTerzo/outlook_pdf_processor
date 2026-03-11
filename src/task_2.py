@@ -46,6 +46,7 @@ def process_pdf_task2(temp_pdf_path, output_folder, original_filename):
     else:
         # Move to MANUAL REVIEW folder with unique name
         manual_folder = output_folder / "MANUAL REVIEW"
+        manual_folder.mkdir(exist_ok=True)  # Create folder only when needed
 
         # Create unique filename if file already exists
         counter = 1
@@ -152,9 +153,6 @@ def run_task_2(log_func=print):
         temp_folder = pdf_folder / "temp"
         temp_folder.mkdir(exist_ok=True)
 
-        manual_review_folder = pdf_folder / "MANUAL REVIEW"
-        manual_review_folder.mkdir(exist_ok=True)
-
         log_func("Task 2: Attempting to connect to Outlook...")
         outlook, namespace = connect_to_outlook()
         log_func(" Successfully connected to Outlook!")
@@ -222,6 +220,7 @@ def run_task_2(log_func=print):
         log_func(f"  Location: {pdf_folder}")
 
         if manual_review_count > 0:
+            manual_review_folder = pdf_folder / "MANUAL REVIEW"
             log_func(
                 f"\n WARNING: {manual_review_count} file(s) need manual review")
             log_func(f"  Location: {manual_review_folder}")
