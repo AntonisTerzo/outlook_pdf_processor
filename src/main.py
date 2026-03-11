@@ -76,7 +76,7 @@ class OutlookProcessorGUI:
             text="Start Task_2",
             command=self.start_task_2,
             font=("Arial", 12, "bold"),
-            bg="#52BE80",  # Light green
+            bg="#5DADE2",
             fg="white",
             width=15,
             height=1,
@@ -131,13 +131,12 @@ class OutlookProcessorGUI:
     def run_task_1(self):
         """Run Task 1 processor"""
         try:
-            processed, manual = run_task_1(self.log)
+            processed, manual, folder_path = run_task_1(self.log)
 
             if processed > 0 or manual > 0:
-                # Open pdf extraction folder
-                downloads = Path.home() / "Downloads"
-                pdf_folder = downloads / "pdf extraction"
-                os.startfile(pdf_folder)
+                # Open the task folder
+                if folder_path:
+                    os.startfile(folder_path)
 
                 messagebox.showinfo(
                     "Task 1 Complete",
@@ -166,13 +165,12 @@ class OutlookProcessorGUI:
     def run_task_2(self):
         """Run Task 2 processor"""
         try:
-            processed, manual = run_task_2(self.log)
+            processed, manual, folder_path = run_task_2(self.log)
 
             if processed > 0 or manual > 0:
-                # Open pdf extraction folder
-                downloads = Path.home() / "Downloads"
-                pdf_folder = downloads / "pdf extraction"
-                os.startfile(pdf_folder)
+                # Open the task folder
+                if folder_path:
+                    os.startfile(folder_path)
 
                 messagebox.showinfo(
                     "Task 2 Complete",
