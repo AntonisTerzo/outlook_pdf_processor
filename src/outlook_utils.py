@@ -1,5 +1,31 @@
 import win32com.client
 import pythoncom
+from pathlib import Path
+
+
+def create_unique_folder(base_path, folder_name):
+    """
+    Create a unique folder. If folder exists, add (1), (2), etc.
+    Example: outlook_pdf_processor_task_1 -> outlook_pdf_processor_task_1(1)
+    Returns the created folder path.
+    """
+    folder_path = base_path / folder_name
+
+    if not folder_path.exists():
+        folder_path.mkdir(parents=True, exist_ok=True)
+        return folder_path
+
+    # Folder exists, find next available number
+    counter = 1
+    while True:
+        new_folder_name = f"{folder_name}({counter})"
+        new_folder_path = base_path / new_folder_name
+
+        if not new_folder_path.exists():
+            new_folder_path.mkdir(parents=True, exist_ok=True)
+            return new_folder_path
+
+        counter += 1
 
 
 def connect_to_outlook():
@@ -24,16 +50,10 @@ def find_outlook_folder(namespace, folder_name):
     """
     inbox = namespace.GetDefaultFolder(6)  # 6 = Inbox
 
-    # Check in Inbox folders first
+    # Check only in Inbox folders
     for folder in inbox.Folders:
         if folder.Name.lower() == folder_name.lower():
             return folder
-
-    # Search in all root folders
-    for folder in namespace.Folders:
-        for subfolder in folder.Folders:
-            if subfolder.Name.lower() == folder_name.lower():
-                return subfolder
 
     return None
 
