@@ -50,12 +50,53 @@ def extract_info_from_pdf_task1(pdf_path, cities_list):
         return None, None
 
 
+def check_city_inside_pdf(pdf_path, cities_list):
+    """
+    Check inside PDF for city names (same method as Task 1).
+    Searches in the Warenempfänger section and returns the LAST matching city.
+    Used for Brasilien subcities and manual review fallback.
+    Returns the city name if found, None otherwise.
+    """
+    try:
+        with open(pdf_path, 'rb') as file:
+            pdf_reader = PdfReader(file)
+            text = ""
+            for page in pdf_reader.pages:
+                text += page.extract_text()
+
+            # Find the section after "Warenempfänger:"
+            warenempfanger_match = re.search(
+                r'Warenempfänger:(.*?)(?=Besteller|Lieferkondition:|Pack- und Gewichtsliste|$)', text, re.DOTALL)
+
+            city = None
+            if warenempfanger_match:
+                warenempfanger_section = warenempfanger_match.group(1)
+
+                # Find ALL cities in the section, then take the LAST one
+                found_cities = []
+                for city_name in cities_list:
+                    # Find all matches for this city
+                    for match in re.finditer(r'\b' + re.escape(city_name) + r'\b',
+                                             warenempfanger_section, re.IGNORECASE):
+                        found_cities.append((match.start(), city_name))
+
+                # Sort by position and take the last one (closest to Pack- und Gewichtsliste)
+                if found_cities:
+                    found_cities.sort(key=lambda x: x[0])
+                    city = found_cities[-1][1]
+
+            return city
+
+    except Exception as e:
+        print(f"Error checking city inside PDF: {e}")
+        return None
+
+
 def extract_city_from_filename_task2(filename, cities_list):
     """
     Extract city name from PDF filename for Task 2.
-    Searches the filename for any city from the cities_list.
-    IMPORTANT: Checks longer names FIRST to avoid partial matches.
-    Example: "BRASILIEN JOINVILLE" must be checked before "BRASILIEN"
+    Handles cities with multiple words that may have text in between.
+    Example: "Japan XYZ Kyoto" should match "JAPAN KYOTO"
     Returns the city name if found, None otherwise.
     """
     try:
@@ -65,10 +106,22 @@ def extract_city_from_filename_task2(filename, cities_list):
         # Sort cities by length (longest first) to match specific names before generic ones
         sorted_cities = sorted(cities_list, key=len, reverse=True)
 
-        # Search for each city in the filename (case-insensitive)
+        # Search for each city in the filename
         for city_name in sorted_cities:
-            if re.search(re.escape(city_name), name_without_ext, re.IGNORECASE):
-                return city_name
+            # Split city name into words
+            city_words = city_name.split()
+
+            if len(city_words) == 1:
+                # Single word city - simple match
+                if re.search(r'\b' + re.escape(city_name) + r'\b', name_without_ext, re.IGNORECASE):
+                    return city_name
+            else:
+                # Multi-word city - allow any text between words
+                # Example: "JAPAN KYOTO" becomes pattern "JAPAN.*KYOTO"
+                pattern = r'\b' + r'.*'.join(re.escape(word)
+                                             for word in city_words) + r'\b'
+                if re.search(pattern, name_without_ext, re.IGNORECASE):
+                    return city_name
 
         return None
     except Exception as e:
@@ -99,7 +152,8 @@ def round_dimension(value_mm):
 
 def extract_dimensions_from_pdf(pdf_path):
     """
-    Extract dimensions from PDF under "Abmessung(MM)" column.
+    Extract dimensions from PDF ONLY from the "Abmessung(MM)" column.
+    Based on the PDF structure where dimensions appear on the same line as "Abmessung(MM)".
     Returns list of dimension strings in format "LxWxH" (in centimeters, rounded).
     Example: ["68x36x47", "55x30x40", "1x2x3"]
     """
@@ -112,22 +166,34 @@ def extract_dimensions_from_pdf(pdf_path):
 
             dimensions = []
 
-            # Pattern to find dimensions in format: 680x360x470 or 10x20x30 (2-4 digits each)
-            dimension_pattern = r'(\d{2,4})[xX](\d{2,4})[xX](\d{2,4})'
+            # Split text into lines
+            lines = text.split('\n')
 
-            for match in re.finditer(dimension_pattern, text):
-                length_mm = int(match.group(1))
-                width_mm = int(match.group(2))
-                height_mm = int(match.group(3))
+            # Find lines that contain "Abmessung(MM)"
+            for i, line in enumerate(lines):
+                if 'Abmessung' in line and 'MM' in line:
+                    # This is a header line, check the next line for data
+                    # In the structure, data appears on the next line
+                    if i + 1 < len(lines):
+                        data_line = lines[i + 1]
 
-                # Convert to centimeters with rounding
-                length_cm = round_dimension(length_mm)
-                width_cm = round_dimension(width_mm)
-                height_cm = round_dimension(height_mm)
+                        # Look for dimension pattern in this data line
+                        dimension_pattern = r'(\d{2,4})[xX](\d{2,4})[xX](\d{2,4})'
+                        matches = re.finditer(dimension_pattern, data_line)
 
-                # Format as "LxWxH"
-                dimension_str = f"{length_cm}x{width_cm}x{height_cm}"
-                dimensions.append(dimension_str)
+                        for match in matches:
+                            length_mm = int(match.group(1))
+                            width_mm = int(match.group(2))
+                            height_mm = int(match.group(3))
+
+                            # Convert to centimeters with rounding
+                            length_cm = round_dimension(length_mm)
+                            width_cm = round_dimension(width_mm)
+                            height_cm = round_dimension(height_mm)
+
+                            # Format as "LxWxH"
+                            dimension_str = f"{length_cm}x{width_cm}x{height_cm}"
+                            dimensions.append(dimension_str)
 
             return dimensions
 

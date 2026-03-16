@@ -1,7 +1,7 @@
 from pathlib import Path
 from collections import defaultdict, Counter
-from config import TASK2_CITIES
-from pdf_utils import extract_city_from_filename_task2, extract_dimensions_from_pdf
+from config import TASK2_CITIES, BRASILIEN_SUBCITIES, MANUAL_REVIEW_FALLBACK_CITIES
+from pdf_utils import extract_city_from_filename_task2, extract_dimensions_from_pdf, check_city_inside_pdf
 from outlook_utils import (
     connect_to_outlook, find_outlook_folder,
     process_msg_file, initialize_com, uninitialize_com,
@@ -22,11 +22,20 @@ def process_pdf_task2(temp_pdf_path, output_folder, original_filename):
     """
     Process a single PDF for Task 2.
     Extracts city from filename, extracts dimensions, and renames with numbering.
+    Special handling:
+    - BRASILIEN (not JOINVILLE): Check inside PDF for INDAIATUBA or RIO CLARO
+    - Manual review files: Check inside PDF for TAPUKARA
     Returns dict with 'success' and 'message' keys.
     """
     city = extract_city_from_filename_task2(original_filename, TASK2_CITIES)
 
     if city:
+        # Special handling for BRASILIEN (not BRASILIEN JOINVILLE)
+        if city == "BRASILIEN":
+            subcity = check_city_inside_pdf(temp_pdf_path, BRASILIEN_SUBCITIES)
+            if subcity:
+                city = f"BRASILIEN {subcity}"
+
         # Increment counter for this city
         city_counter[city] += 1
         count = city_counter[city]
@@ -37,29 +46,49 @@ def process_pdf_task2(temp_pdf_path, output_folder, original_filename):
         # Store dimensions for this file
         dimensions_data[city][count] = dimensions
 
-        # Create filename: "BRASILIEN 1.pdf", "BRASILIEN 2.pdf", etc.
+        # Create filename: "BRASILIEN INDAIATUBA 1.pdf", etc.
         new_filename = f"{city} {count}.pdf"
         final_path = output_folder / new_filename
         temp_pdf_path.rename(final_path)
 
         return {'success': True, 'message': f"Saved as: {new_filename} ({len(dimensions)} dimensions found)"}
     else:
-        # Move to MANUAL REVIEW folder with unique name
-        manual_folder = output_folder / "MANUAL REVIEW"
-        manual_folder.mkdir(exist_ok=True)  # Create folder only when needed
+        # Manual review - check for fallback cities inside PDF
+        fallback_city = check_city_inside_pdf(
+            temp_pdf_path, MANUAL_REVIEW_FALLBACK_CITIES)
 
-        # Create unique filename if file already exists
-        counter = 1
-        final_path = manual_folder / original_filename
+        if fallback_city:
+            # Found a fallback city (e.g., TAPUKARA)
+            city_counter[fallback_city] += 1
+            count = city_counter[fallback_city]
 
-        while final_path.exists():
-            name_without_ext = original_filename.replace(
-                '.pdf', '').replace('.PDF', '')
-            final_path = manual_folder / f"{name_without_ext}({counter}).pdf"
-            counter += 1
+            # Extract dimensions
+            dimensions = extract_dimensions_from_pdf(temp_pdf_path)
+            dimensions_data[fallback_city][count] = dimensions
 
-        temp_pdf_path.rename(final_path)
-        return {'success': False, 'message': f"Moved to MANUAL REVIEW: {final_path.name}"}
+            new_filename = f"{fallback_city} {count}.pdf"
+            final_path = output_folder / new_filename
+            temp_pdf_path.rename(final_path)
+
+            return {'success': True, 'message': f"Saved as: {new_filename} (found via PDF scan)"}
+        else:
+            # Move to MANUAL REVIEW folder with unique name
+            manual_folder = output_folder / "MANUAL REVIEW"
+            manual_folder.mkdir(exist_ok=True)
+
+            # Create unique filename if file already exists
+            counter = 1
+            final_path = manual_folder / original_filename
+
+            while final_path.exists():
+                name_without_ext = original_filename.replace(
+                    '.pdf', '').replace('.PDF', '')
+                final_path = manual_folder / \
+                    f"{name_without_ext}({counter}).pdf"
+                counter += 1
+
+            temp_pdf_path.rename(final_path)
+            return {'success': False, 'message': f"Moved to MANUAL REVIEW: {final_path.name}"}
 
 
 def create_excel_report(output_folder):

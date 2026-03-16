@@ -4,7 +4,7 @@
 TASK1_CITIES = [
     "TIANJIN", "SHENYANG", "AMMAN", "WUHAN", "XIAN", "SUZHOU",
     "CAIRO", "HOLON", "ABIDJAN", "ANSAN-SI", "BRAMALEA", "BRIDGEPORT",
-    "DELTA", "DORVAL", "EAST TAMAKI", "FOSHAN", "GUANGZHOU", "HAYWARD",
+    "DELTA", "DORVAL", "EAST TAMAKI", "FOSHAN", "GUANGZOU", "HAYWARD",
     "KOWLOON", "MONTEVIDEO", "MUANG CHONBURI", "SIHEUNG", "SINGAPUR",
     "TROY", "TULLAMARINE"
 ]
@@ -31,5 +31,16 @@ TASK2_CITIES = [
     "CHILE",
     "PERU",
     "ARAB. EMIRATE",
-    "MEXICO"
+    "MEXIKO"
+]
+
+# Task 2 - Brasilien subcities (checked inside PDF)
+BRASILIEN_SUBCITIES = [
+    "INDAIATUBA",
+    "RIO CLARO"
+]
+
+# Task 2 - Manual review fallback cities (checked inside PDF)
+MANUAL_REVIEW_FALLBACK_CITIES = [
+    "TAPUKARA"
 ]
