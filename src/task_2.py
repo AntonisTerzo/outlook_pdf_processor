@@ -165,6 +165,7 @@ def run_task_2(log_func=print):
     """
     Main Task 2 logic: Download PDFs from Task_2 folder, rename by city with numbering,
     extract dimensions and create Excel report.
+    Each email gets its own subfolder named after the email subject.
     """
     # Reset counters and data for this run
     city_counter.clear()
@@ -184,23 +185,39 @@ def run_task_2(log_func=print):
 
         log_func("Task 2: Attempting to connect to Outlook...")
         outlook, namespace = connect_to_outlook()
-        log_func(" Successfully connected to Outlook!")
+        log_func("Successfully connected to Outlook")
 
         # Find Task_2 folder
         task_folder = find_outlook_folder(namespace, "Task_2")
 
         if not task_folder:
-            log_func(" Error: 'Task_2' folder not found!")
-            return 0, 0
+            log_func("Error: Task_2 folder not found in Inbox")
+            return 0, 0, None
 
-        log_func(f" Found folder: {task_folder.Name}")
-        log_func(f"Processing {task_folder.Items.Count} emails...\n")
+        log_func(f"Found folder: {task_folder.Name}")
+        log_func(f"Processing {task_folder.Items.Count} emails\n")
 
-        processed_count = 0
-        manual_review_count = 0
+        total_processed_count = 0
+        total_manual_review_count = 0
 
+        # Process each email - each gets its own subfolder
         for message in task_folder.Items:
-            if hasattr(message, 'Attachments'):
+            if hasattr(message, 'Attachments') and message.Attachments.Count > 0:
+                # Create subfolder for this email using email subject
+                email_subject = message.Subject if message.Subject else "No_Subject"
+                email_subject = email_subject[:100]
+
+                email_folder = pdf_folder / email_subject
+                email_folder.mkdir(exist_ok=True)
+
+                log_func(f"\nProcessing email: {email_subject}")
+
+                # Reset city counter for each email
+                city_counter.clear()
+
+                processed_count = 0
+                manual_review_count = 0
+
                 for attachment in message.Attachments:
                     filename = attachment.FileName
 
@@ -211,7 +228,7 @@ def run_task_2(log_func=print):
                         attachment.SaveAsFile(str(temp_msg_path))
 
                         msg_processed, msg_manual = process_msg_file(
-                            temp_msg_path, temp_folder, pdf_folder, outlook,
+                            temp_msg_path, temp_folder, email_folder, outlook,
                             process_pdf_task2, log_func
                         )
                         processed_count += msg_processed
@@ -226,33 +243,36 @@ def run_task_2(log_func=print):
                         log_func(f"\nDownloaded PDF: {filename}")
 
                         result = process_pdf_task2(
-                            temp_path, pdf_folder, filename)
+                            temp_path, email_folder, filename)
 
                         if result['success']:
-                            log_func(f" {result['message']}")
+                            log_func(result['message'])
                             processed_count += 1
                         else:
-                            log_func(f" {result['message']}")
+                            log_func(result['message'])
                             manual_review_count += 1
 
-        # Create Excel report with dimensions
-        if processed_count > 0:
-            log_func("\nCreating Excel report with dimensions...")
-            excel_path = create_excel_report(pdf_folder)
-            if excel_path:
-                log_func(f" Excel report created: {excel_path.name}")
+                # Create Excel for this email
+                if processed_count > 0:
+                    log_func("\nCreating Excel report for this email...")
+                    excel_path = create_excel_report(email_folder)
+                    if excel_path:
+                        log_func(f"Excel report created: {excel_path.name}")
+
+                log_func(
+                    f"Email '{email_subject}': {processed_count} processed, {manual_review_count} need review")
+                total_processed_count += processed_count
+                total_manual_review_count += manual_review_count
 
         # Final summary
         log_func("\n" + "="*60)
-        log_func("Task 2 Processing complete!")
-        log_func(f" {processed_count} files renamed and saved.")
-        log_func(f"  Location: {pdf_folder}")
+        log_func("Task 2 Processing complete")
+        log_func(f"{total_processed_count} files renamed and saved")
+        log_func(f"Location: {pdf_folder}")
 
-        if manual_review_count > 0:
-            manual_review_folder = pdf_folder / "MANUAL REVIEW"
+        if total_manual_review_count > 0:
             log_func(
-                f"\n WARNING: {manual_review_count} file(s) need manual review")
-            log_func(f"  Location: {manual_review_folder}")
+                f"\nWARNING: {total_manual_review_count} files need manual review")
 
         log_func("="*60)
 
@@ -262,10 +282,10 @@ def run_task_2(log_func=print):
             if not remaining_files:
                 temp_folder.rmdir()
 
-        return processed_count, manual_review_count, pdf_folder
+        return total_processed_count, total_manual_review_count, pdf_folder
 
     except Exception as e:
-        log_func(f"\n Error: {e}")
+        log_func(f"\nError: {e}")
         import traceback
         traceback.print_exc()
         return 0, 0, None

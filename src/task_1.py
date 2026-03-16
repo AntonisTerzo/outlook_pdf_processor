@@ -23,7 +23,7 @@ def process_pdf_task1(temp_pdf_path, output_folder, original_filename):
     else:
         # Move to MANUAL REVIEW folder with unique name
         manual_folder = output_folder / "MANUAL REVIEW"
-        manual_folder.mkdir(exist_ok=True)  # Create folder only when needed
+        manual_folder.mkdir(exist_ok=True)
 
         # Create unique filename if file already exists
         counter = 1
@@ -42,6 +42,7 @@ def process_pdf_task1(temp_pdf_path, output_folder, original_filename):
 def run_task_1(log_func=print):
     """
     Main Task 1 logic: Download PDFs from Task_1 folder and rename them.
+    Each email gets its own subfolder named after the email subject.
     """
     initialize_com()
 
@@ -57,23 +58,36 @@ def run_task_1(log_func=print):
 
         log_func("Task 1: Attempting to connect to Outlook...")
         outlook, namespace = connect_to_outlook()
-        log_func(" Successfully connected to Outlook!")
+        log_func("Successfully connected to Outlook")
 
         # Find Task_1 folder
         task_folder = find_outlook_folder(namespace, "Task_1")
 
         if not task_folder:
-            log_func(" Error: 'Task_1' folder not found!")
-            return 0, 0
+            log_func("Error: Task_1 folder not found in Inbox")
+            return 0, 0, None
 
-        log_func(f" Found folder: {task_folder.Name}")
-        log_func(f"Processing {task_folder.Items.Count} emails...\n")
+        log_func(f"Found folder: {task_folder.Name}")
+        log_func(f"Processing {task_folder.Items.Count} emails\n")
 
-        processed_count = 0
-        manual_review_count = 0
+        total_processed_count = 0
+        total_manual_review_count = 0
 
+        # Process each email - each gets its own subfolder
         for message in task_folder.Items:
-            if hasattr(message, 'Attachments'):
+            if hasattr(message, 'Attachments') and message.Attachments.Count > 0:
+                # Create subfolder for this email using email subject
+                email_subject = message.Subject if message.Subject else "No_Subject"
+                email_subject = email_subject[:100]
+
+                email_folder = pdf_folder / email_subject
+                email_folder.mkdir(exist_ok=True)
+
+                log_func(f"\nProcessing email: {email_subject}")
+
+                processed_count = 0
+                manual_review_count = 0
+
                 for attachment in message.Attachments:
                     filename = attachment.FileName
 
@@ -84,7 +98,7 @@ def run_task_1(log_func=print):
                         attachment.SaveAsFile(str(temp_msg_path))
 
                         msg_processed, msg_manual = process_msg_file(
-                            temp_msg_path, temp_folder, pdf_folder, outlook,
+                            temp_msg_path, temp_folder, email_folder, outlook,
                             process_pdf_task1, log_func
                         )
                         processed_count += msg_processed
@@ -99,26 +113,29 @@ def run_task_1(log_func=print):
                         log_func(f"\nDownloaded PDF: {filename}")
 
                         result = process_pdf_task1(
-                            temp_path, pdf_folder, filename)
+                            temp_path, email_folder, filename)
 
                         if result['success']:
-                            log_func(f" {result['message']}")
+                            log_func(result['message'])
                             processed_count += 1
                         else:
-                            log_func(f" {result['message']}")
+                            log_func(result['message'])
                             manual_review_count += 1
+
+                log_func(
+                    f"Email '{email_subject}': {processed_count} processed, {manual_review_count} need review")
+                total_processed_count += processed_count
+                total_manual_review_count += manual_review_count
 
         # Final summary
         log_func("\n" + "="*60)
-        log_func("Task 1 Processing complete!")
-        log_func(f" {processed_count} files renamed and saved.")
-        log_func(f"  Location: {pdf_folder}")
+        log_func("Task 1 Processing complete")
+        log_func(f"{total_processed_count} files renamed and saved")
+        log_func(f"Location: {pdf_folder}")
 
-        if manual_review_count > 0:
-            manual_review_folder = pdf_folder / "MANUAL REVIEW"
+        if total_manual_review_count > 0:
             log_func(
-                f"\n WARNING: {manual_review_count} file(s) need manual review")
-            log_func(f"  Location: {manual_review_folder}")
+                f"\nWARNING: {total_manual_review_count} files need manual review")
 
         log_func("="*60)
 
@@ -128,10 +145,10 @@ def run_task_1(log_func=print):
             if not remaining_files:
                 temp_folder.rmdir()
 
-        return processed_count, manual_review_count, pdf_folder
+        return total_processed_count, total_manual_review_count, pdf_folder
 
     except Exception as e:
-        log_func(f"\n Error: {e}")
+        log_func(f"\nError: {e}")
         return 0, 0, None
 
     finally:
