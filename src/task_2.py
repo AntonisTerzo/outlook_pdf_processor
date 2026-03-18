@@ -72,9 +72,16 @@ def process_pdf_task2(temp_pdf_path, output_folder, original_filename):
 
             return {'success': True, 'message': f"Saved as: {new_filename} (found via PDF scan)"}
         else:
-            # Move to MANUAL REVIEW folder with unique name
+            # Move to MANUAL REVIEW folder - but still extract dimensions
             manual_folder = output_folder / "MANUAL REVIEW"
             manual_folder.mkdir(exist_ok=True)
+
+            # Extract dimensions even for manual review files
+            dimensions = extract_dimensions_from_pdf(temp_pdf_path)
+
+            # Store dimensions under "MANUAL REVIEW" category with original filename
+            if dimensions:
+                dimensions_data["MANUAL REVIEW"][original_filename] = dimensions
 
             # Create unique filename if file already exists
             counter = 1
@@ -88,7 +95,9 @@ def process_pdf_task2(temp_pdf_path, output_folder, original_filename):
                 counter += 1
 
             temp_pdf_path.rename(final_path)
-            return {'success': False, 'message': f"Moved to MANUAL REVIEW: {final_path.name}"}
+
+            dim_msg = f" ({len(dimensions)} dimensions found)" if dimensions else ""
+            return {'success': False, 'message': f"Moved to MANUAL REVIEW: {final_path.name}{dim_msg}"}
 
 
 def create_excel_report(output_folder):
@@ -205,9 +214,16 @@ def run_task_2(log_func=print):
             if hasattr(message, 'Attachments') and message.Attachments.Count > 0:
                 # Create subfolder for this email using email subject
                 email_subject = message.Subject if message.Subject else "No_Subject"
-                email_subject = email_subject[:100]
+                email_subject = email_subject[:300]
 
-                email_folder = pdf_folder / email_subject
+                # Make folder name unique if it already exists
+                base_email_folder = pdf_folder / email_subject
+                email_folder = base_email_folder
+                counter = 1
+                while email_folder.exists():
+                    email_folder = pdf_folder / f"{email_subject}({counter})"
+                    counter += 1
+
                 email_folder.mkdir(exist_ok=True)
 
                 log_func(f"\nProcessing email: {email_subject}")
@@ -252,8 +268,8 @@ def run_task_2(log_func=print):
                             log_func(result['message'])
                             manual_review_count += 1
 
-                # Create Excel for this email
-                if processed_count > 0:
+                # Create Excel for this email if ANY files were processed OR have dimensions
+                if processed_count > 0 or dimensions_data:
                     log_func("\nCreating Excel report for this email...")
                     excel_path = create_excel_report(email_folder)
                     if excel_path:

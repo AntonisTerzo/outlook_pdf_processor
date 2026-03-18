@@ -17,7 +17,7 @@ def extract_info_from_pdf_task1(pdf_path, cities_list):
 
             # Find the section after "Warenempfänger:"
             warenempfanger_match = re.search(
-                r'Warenempfänger:(.*?)(?=Lieferkondition:|$)', text, re.DOTALL)
+                r'Warenempfänger:(.*?)(?=Besteller|Lieferkondition:|$)', text, re.DOTALL)
 
             city = None
             if warenempfanger_match:
@@ -65,8 +65,9 @@ def check_city_inside_pdf(pdf_path, cities_list):
                 text += page.extract_text()
 
             # Find the section after "Warenempfänger:"
+            # Stop at "Besteller" (sender section) OR "Pack- und Gewichtsliste"
             warenempfanger_match = re.search(
-                r'Warenempfänger:(.*?)(?=Besteller|Lieferkondition:|Pack- und Gewichtsliste|$)', text, re.DOTALL)
+                r'Warenempfänger:(.*?)(?=Besteller|Pack- und Gewichtsliste|Lieferkondition:|$)', text, re.DOTALL)
 
             city = None
             if warenempfanger_match:
@@ -80,7 +81,7 @@ def check_city_inside_pdf(pdf_path, cities_list):
                                              warenempfanger_section, re.IGNORECASE):
                         found_cities.append((match.start(), city_name))
 
-                # Sort by position and take the last one (closest to Pack- und Gewichtsliste)
+                # Sort by position and take the last one
                 if found_cities:
                     found_cities.sort(key=lambda x: x[0])
                     city = found_cities[-1][1]
@@ -153,7 +154,7 @@ def round_dimension(value_mm):
 def extract_dimensions_from_pdf(pdf_path):
     """
     Extract dimensions from PDF ONLY from the "Abmessung(MM)" column.
-    Based on the PDF structure where dimensions appear on the same line as "Abmessung(MM)".
+    Handles cases where dimensions span multiple pages.
     Returns list of dimension strings in format "LxWxH" (in centimeters, rounded).
     Example: ["68x36x47", "55x30x40", "1x2x3"]
     """
@@ -169,17 +170,25 @@ def extract_dimensions_from_pdf(pdf_path):
             # Split text into lines
             lines = text.split('\n')
 
-            # Find lines that contain "Abmessung(MM)"
-            for i, line in enumerate(lines):
-                if 'Abmessung' in line and 'MM' in line:
-                    # This is a header line, check the next line for data
-                    # In the structure, data appears on the next line
-                    if i + 1 < len(lines):
-                        data_line = lines[i + 1]
+            # Track if we're in an Abmessung section
+            in_abmessung_section = False
+            lines_since_header = 0
 
-                        # Look for dimension pattern in this data line
+            for i, line in enumerate(lines):
+                # Check if this line contains "Abmessung(MM)" header
+                if 'Abmessung' in line and 'MM' in line:
+                    in_abmessung_section = True
+                    lines_since_header = 0
+                    continue
+
+                if in_abmessung_section:
+                    lines_since_header += 1
+
+                    # Look for dimension pattern in the next few lines (up to 5 lines after header)
+                    # This handles dimensions that span to next page
+                    if lines_since_header <= 5:
                         dimension_pattern = r'(\d{2,4})[xX](\d{2,4})[xX](\d{2,4})'
-                        matches = re.finditer(dimension_pattern, data_line)
+                        matches = re.finditer(dimension_pattern, line)
 
                         for match in matches:
                             length_mm = int(match.group(1))
@@ -194,6 +203,10 @@ def extract_dimensions_from_pdf(pdf_path):
                             # Format as "LxWxH"
                             dimension_str = f"{length_cm}x{width_cm}x{height_cm}"
                             dimensions.append(dimension_str)
+
+                    # Check if we've hit another header or section - stop tracking this Abmessung
+                    if 'Colli-Nr' in line or 'Bestellung' in line or lines_since_header > 5:
+                        in_abmessung_section = False
 
             return dimensions
 
