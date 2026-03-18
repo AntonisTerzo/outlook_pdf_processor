@@ -87,10 +87,10 @@ def process_msg_file(msg_path, temp_folder, output_folder, outlook, process_pdf_
                         temp_pdf_path, output_folder, attachment.FileName)
 
                     if result['success']:
-                        log_func(f"    ✓ {result['message']}")
+                        log_func(f"     {result['message']}")
                         processed += 1
                     else:
-                        log_func(f"    ⚠ {result['message']}")
+                        log_func(f"     {result['message']}")
                         manual_review += 1
                 else:
                     log_func(f"    Skipping non-PDF: {attachment.FileName}")
