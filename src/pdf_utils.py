@@ -155,8 +155,10 @@ def extract_dimensions_from_pdf(pdf_path):
     """
     Extract dimensions from PDF ONLY from the "Abmessung(MM)" column.
     Handles cases where dimensions span multiple pages.
-    Returns list of dimension strings in format "LxWxH" (in centimeters, rounded).
-    Example: ["68x36x47", "55x30x40", "1x2x3"]
+    Returns tuple: (list of dimension strings, warning message or None)
+    - Dimensions in format "LxWxH" (in centimeters, rounded)
+    - Warning if any Abmessung section had no dimensions
+    Example: (["68x36x47", "55x30x40"], None) or ([], "WARNING: Found 2 Abmessung sections with no dimensions")
     """
     try:
         with open(pdf_path, 'rb') as file:
@@ -170,23 +172,31 @@ def extract_dimensions_from_pdf(pdf_path):
             # Split text into lines
             lines = text.split('\n')
 
-            # Track if we're in an Abmessung section
+            # Track Abmessung sections and whether they have dimensions
             in_abmessung_section = False
             lines_since_header = 0
+            current_section_has_dimensions = False
+            abmessung_sections_without_dimensions = 0
 
             for i, line in enumerate(lines):
                 # Check if this line contains "Abmessung(MM)" header
                 if 'Abmessung' in line and 'MM' in line:
+                    # If we were already in a section, check if it had dimensions
+                    if in_abmessung_section and not current_section_has_dimensions:
+                        abmessung_sections_without_dimensions += 1
+
+                    # Start new section
                     in_abmessung_section = True
                     lines_since_header = 0
+                    current_section_has_dimensions = False
                     continue
 
                 if in_abmessung_section:
                     lines_since_header += 1
 
-                    # Look for dimension pattern in the next few lines (up to 5 lines after header)
-                    # This handles dimensions that span to next page
-                    if lines_since_header <= 5:
+                    # Look for dimension pattern in the next 12 lines after header
+                    # This handles page breaks: 5-6 lines at end of page + 2-3 lines at start + dimensions
+                    if lines_since_header <= 12:
                         dimension_pattern = r'(\d{2,4})[xX](\d{2,4})[xX](\d{2,4})'
                         matches = re.finditer(dimension_pattern, line)
 
@@ -203,13 +213,27 @@ def extract_dimensions_from_pdf(pdf_path):
                             # Format as "LxWxH"
                             dimension_str = f"{length_cm}x{width_cm}x{height_cm}"
                             dimensions.append(dimension_str)
+                            current_section_has_dimensions = True
 
                     # Check if we've hit another header or section - stop tracking this Abmessung
-                    if 'Colli-Nr' in line or 'Bestellung' in line or lines_since_header > 5:
+                    if 'Bestellung' in line or lines_since_header > 10:
+                        # Before closing section, check if it had dimensions
+                        if not current_section_has_dimensions:
+                            abmessung_sections_without_dimensions += 1
+
                         in_abmessung_section = False
 
-            return dimensions
+            # Check the last section if we ended while still in one
+            if in_abmessung_section and not current_section_has_dimensions:
+                abmessung_sections_without_dimensions += 1
+
+            # Create warning message if needed
+            warning = None
+            if abmessung_sections_without_dimensions > 0:
+                warning = f"WARNING: Found {abmessung_sections_without_dimensions} Abmessung section(s) with no dimensions"
+
+            return dimensions, warning
 
     except Exception as e:
         print(f"Error extracting dimensions from PDF: {e}")
-        return []
+        return [], None
