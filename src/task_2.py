@@ -41,7 +41,7 @@ def process_pdf_task2(temp_pdf_path, output_folder, original_filename):
         count = city_counter[city]
 
         # Extract dimensions from PDF
-        dimensions = extract_dimensions_from_pdf(temp_pdf_path)
+        dimensions, warning = extract_dimensions_from_pdf(temp_pdf_path)
 
         # Store dimensions for this file
         dimensions_data[city][count] = dimensions
@@ -51,7 +51,12 @@ def process_pdf_task2(temp_pdf_path, output_folder, original_filename):
         final_path = output_folder / new_filename
         temp_pdf_path.rename(final_path)
 
-        return {'success': True, 'message': f"Saved as: {new_filename} ({len(dimensions)} dimensions found)"}
+        # Build message with warning if needed
+        message = f"Saved as: {new_filename} ({len(dimensions)} dimensions found)"
+        if warning:
+            message += f" - {warning}"
+
+        return {'success': True, 'message': message}
     else:
         # Manual review - check for fallback cities inside PDF
         fallback_city = check_city_inside_pdf(
@@ -63,21 +68,26 @@ def process_pdf_task2(temp_pdf_path, output_folder, original_filename):
             count = city_counter[fallback_city]
 
             # Extract dimensions
-            dimensions = extract_dimensions_from_pdf(temp_pdf_path)
+            dimensions, warning = extract_dimensions_from_pdf(temp_pdf_path)
             dimensions_data[fallback_city][count] = dimensions
 
             new_filename = f"{fallback_city} {count}.pdf"
             final_path = output_folder / new_filename
             temp_pdf_path.rename(final_path)
 
-            return {'success': True, 'message': f"Saved as: {new_filename} (found via PDF scan)"}
+            # Build message with warning if needed
+            message = f"Saved as: {new_filename} (found via PDF scan)"
+            if warning:
+                message += f" - {warning}"
+
+            return {'success': True, 'message': message}
         else:
             # Move to MANUAL REVIEW folder - but still extract dimensions
             manual_folder = output_folder / "MANUAL REVIEW"
             manual_folder.mkdir(exist_ok=True)
 
             # Extract dimensions even for manual review files
-            dimensions = extract_dimensions_from_pdf(temp_pdf_path)
+            dimensions, warning = extract_dimensions_from_pdf(temp_pdf_path)
 
             # Store dimensions under "MANUAL REVIEW" category with original filename
             if dimensions:
@@ -96,7 +106,11 @@ def process_pdf_task2(temp_pdf_path, output_folder, original_filename):
 
             temp_pdf_path.rename(final_path)
 
+            # Build message with dimension count and warning
             dim_msg = f" ({len(dimensions)} dimensions found)" if dimensions else ""
+            if warning:
+                dim_msg += f" - {warning}"
+
             return {'success': False, 'message': f"Moved to MANUAL REVIEW: {final_path.name}{dim_msg}"}
 
 

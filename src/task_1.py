@@ -78,9 +78,16 @@ def run_task_1(log_func=print):
             if hasattr(message, 'Attachments') and message.Attachments.Count > 0:
                 # Create subfolder for this email using email subject
                 email_subject = message.Subject if message.Subject else "No_Subject"
-                email_subject = email_subject[:100]
+                email_subject = email_subject[:300]  # Limit length
 
-                email_folder = pdf_folder / email_subject
+                # Make folder name unique if it already exists
+                base_email_folder = pdf_folder / email_subject
+                email_folder = base_email_folder
+                counter = 1
+                while email_folder.exists():
+                    email_folder = pdf_folder / f"{email_subject}({counter})"
+                    counter += 1
+
                 email_folder.mkdir(exist_ok=True)
 
                 log_func(f"\nProcessing email: {email_subject}")
