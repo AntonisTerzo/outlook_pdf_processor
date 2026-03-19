@@ -2,6 +2,46 @@ import re
 from pypdf import PdfReader
 
 
+def extract_versand_for_tianjin(pdf_path):
+    """
+    Extract Versand value specifically for TIANJIN city.
+    Searches for one of: China TI ASS, China TI IG 4, China TI IG, China TI ED, China TI PROD
+    Returns the found value or None.
+    """
+    try:
+        with open(pdf_path, 'rb') as file:
+            pdf_reader = PdfReader(file)
+            text = ""
+            for page in pdf_reader.pages:
+                text += page.extract_text()
+
+            # Find the section after "Versand:"
+            versand_match = re.search(
+                r'Versand:(.*?)(?=\n\n|Warenempfänger:|Besteller|$)', text, re.DOTALL)
+
+            if versand_match:
+                versand_section = versand_match.group(1)
+
+                # List of possible Versand values for TIANJIN (ordered by specificity - longest first)
+                tianjin_versand_options = [
+                    "China TI IG 4",
+                    "China TI ASS",
+                    "China TI PROD",
+                    "China TI ED",
+                    "China TI IG"
+                ]
+
+                # Search for each option in order
+                for option in tianjin_versand_options:
+                    if re.search(r'\b' + re.escape(option) + r'\b', versand_section, re.IGNORECASE):
+                        return option
+
+            return None
+    except Exception as e:
+        print(f"Error extracting Versand for TIANJIN: {e}")
+        return None
+
+
 def extract_info_from_pdf_task1(pdf_path, cities_list):
     """
     Extract city name and document number from PDF for Task 1.
@@ -216,7 +256,7 @@ def extract_dimensions_from_pdf(pdf_path):
                             current_section_has_dimensions = True
 
                     # Check if we've hit another header or section - stop tracking this Abmessung
-                    if 'Bestellung' in line or lines_since_header > 10:
+                    if 'Colli-Nr' in line or 'Bestellung' in line or lines_since_header > 12:
                         # Before closing section, check if it had dimensions
                         if not current_section_has_dimensions:
                             abmessung_sections_without_dimensions += 1

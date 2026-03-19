@@ -1,6 +1,6 @@
 from pathlib import Path
 from config import TASK1_CITIES
-from pdf_utils import extract_info_from_pdf_task1
+from pdf_utils import extract_info_from_pdf_task1, extract_versand_for_tianjin
 from outlook_utils import (
     connect_to_outlook, find_outlook_folder,
     process_msg_file, initialize_com, uninitialize_com,
@@ -11,12 +11,25 @@ from outlook_utils import (
 def process_pdf_task1(temp_pdf_path, output_folder, original_filename):
     """
     Process a single PDF for Task 1.
+    Special handling for TIANJIN: checks Versand field for specific values.
     Returns dict with 'success' and 'message' keys.
     """
     city, doc_number = extract_info_from_pdf_task1(temp_pdf_path, TASK1_CITIES)
 
     if city and doc_number:
-        new_filename = f"{city}_{doc_number}.pdf"
+        # Special handling for TIANJIN - check Versand field
+        if city.upper() == "TIANJIN":
+            versand_value = extract_versand_for_tianjin(temp_pdf_path)
+            if versand_value:
+                # Include Versand value in filename: TIANJIN_China TI ASS_12345678.pdf
+                new_filename = f"{city}_{versand_value}_{doc_number}.pdf"
+            else:
+                # No Versand value found, just use TIANJIN
+                new_filename = f"{city}_{doc_number}.pdf"
+        else:
+            # Regular filename for other cities
+            new_filename = f"{city}_{doc_number}.pdf"
+
         final_path = output_folder / new_filename
         temp_pdf_path.rename(final_path)
         return {'success': True, 'message': f"Saved as: {new_filename}"}
