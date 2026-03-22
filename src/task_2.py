@@ -197,15 +197,6 @@ def run_task_2(log_func=print):
     initialize_com()
 
     try:
-        # Create unique task folder
-        downloads = Path.home() / "Downloads"
-        pdf_folder = create_unique_folder(
-            downloads, "outlook_pdf_processor_task_2")
-        log_func(f"Created folder: {pdf_folder.name}")
-
-        temp_folder = pdf_folder / "temp"
-        temp_folder.mkdir(exist_ok=True)
-
         log_func("Task 2: Attempting to connect to Outlook...")
         outlook, namespace = connect_to_outlook()
         log_func("Successfully connected to Outlook")
@@ -218,7 +209,22 @@ def run_task_2(log_func=print):
             return 0, 0, None
 
         log_func(f"Found folder: {task_folder.Name}")
+
+        # Check if there are any emails to process
+        if task_folder.Items.Count == 0:
+            log_func("\nThere were no emails to process inside Task_2 folder.")
+            return 0, 0, None
+
         log_func(f"Processing {task_folder.Items.Count} emails\n")
+
+        # Only create folders if there are emails to process
+        downloads = Path.home() / "Downloads"
+        pdf_folder = create_unique_folder(
+            downloads, "outlook_pdf_processor_task_2")
+        log_func(f"Created folder: {pdf_folder.name}")
+
+        temp_folder = pdf_folder / "temp"
+        temp_folder.mkdir(exist_ok=True)
 
         total_processed_count = 0
         total_manual_review_count = 0
