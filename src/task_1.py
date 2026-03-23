@@ -8,6 +8,18 @@ from outlook_utils import (
 )
 
 
+def clean_email_subject(subject):
+    """
+    Clean email subject to be used as folder name.
+    Steps:
+    1. Strip leading and trailing whitespaces
+    2. Replace dots (.) with underscores (_)
+    """
+    cleaned = subject.strip()
+    cleaned = cleaned.replace('.', '_')
+    return cleaned
+
+
 def process_pdf_task1(temp_pdf_path, output_folder, original_filename):
     """
     Process a single PDF for Task 1.
@@ -95,9 +107,9 @@ def run_task_1(log_func=print):
         # Process each email - each gets its own subfolder
         for message in task_folder.Items:
             if hasattr(message, 'Attachments') and message.Attachments.Count > 0:
-                # Create subfolder for this email using email subject
                 email_subject = message.Subject if message.Subject else "No_Subject"
-                email_subject = email_subject[:300]  # Limit length
+                email_subject = clean_email_subject(email_subject)
+                email_subject = email_subject[:300]
 
                 # Make folder name unique if it already exists
                 base_email_folder = pdf_folder / email_subject

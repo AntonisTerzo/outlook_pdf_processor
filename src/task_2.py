@@ -11,6 +11,18 @@ import openpyxl
 from openpyxl.styles import Font, Alignment, PatternFill
 
 
+def clean_email_subject(subject):
+    """
+    Clean email subject to be used as folder name.
+    Steps:
+    1. Strip leading and trailing whitespaces
+    2. Replace dots (.) with underscores (_)
+    """
+    cleaned = subject.strip()
+    cleaned = cleaned.replace('.', '_')
+    return cleaned
+
+
 # Track city counts for numbering
 city_counter = defaultdict(int)
 
@@ -232,8 +244,8 @@ def run_task_2(log_func=print):
         # Process each email - each gets its own subfolder
         for message in task_folder.Items:
             if hasattr(message, 'Attachments') and message.Attachments.Count > 0:
-                # Create subfolder for this email using email subject
                 email_subject = message.Subject if message.Subject else "No_Subject"
+                email_subject = clean_email_subject(email_subject)
                 email_subject = email_subject[:300]
 
                 # Make folder name unique if it already exists
