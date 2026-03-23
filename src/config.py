@@ -42,6 +42,11 @@ BRASILIEN_SUBCITIES = [
     "RIO CLARO"
 ]
 
+# Task 2 - Lyman Electronics subcities (checked inside PDF)
+LYMAN_ELECTRONICS_SUBCITIES = [
+    "MAXOLUTION"
+]
+
 # Task 2 - Manual review fallback cities (checked inside PDF)
 MANUAL_REVIEW_FALLBACK_CITIES = [
     "TAPUKARA"

@@ -1,6 +1,6 @@
 from pathlib import Path
 from collections import defaultdict, Counter
-from config import TASK2_CITIES, BRASILIEN_SUBCITIES, MANUAL_REVIEW_FALLBACK_CITIES
+from config import TASK2_CITIES, BRASILIEN_SUBCITIES, MANUAL_REVIEW_FALLBACK_CITIES, LYMAN_ELECTRONICS_SUBCITIES
 from pdf_utils import extract_city_from_filename_task2, extract_dimensions_from_pdf, check_city_inside_pdf
 from outlook_utils import (
     connect_to_outlook, find_outlook_folder,
@@ -47,6 +47,13 @@ def process_pdf_task2(temp_pdf_path, output_folder, original_filename):
             subcity = check_city_inside_pdf(temp_pdf_path, BRASILIEN_SUBCITIES)
             if subcity:
                 city = f"BRASILIEN {subcity}"
+
+        # Special handling for LYMAN ELECTRONICS
+        if city == "LYMAN ELECTRONICS":
+            subcity = check_city_inside_pdf(
+                temp_pdf_path, LYMAN_ELECTRONICS_SUBCITIES)
+            if subcity:
+                city = subcity
 
         # Increment counter for this city
         city_counter[city] += 1
