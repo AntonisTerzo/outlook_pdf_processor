@@ -231,7 +231,7 @@ def extract_dimensions_from_pdf(pdf_path):
 
                 if in_abmessung_section:
                     # Check if we've hit another section header - stop tracking this Abmessung
-                    if 'Colli-Nr' in line or 'Bestellung' in line or 'Pack- und Gewichtsliste' in line:
+                    if 'Bestellung' in line:
                         # Before closing section, check if it had dimensions
                         if not current_section_has_dimensions:
                             abmessung_sections_without_dimensions += 1

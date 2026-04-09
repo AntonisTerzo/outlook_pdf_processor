@@ -165,17 +165,23 @@ class OutlookProcessorGUI:
     def run_task_2(self):
         """Run Task 2 processor"""
         try:
-            processed, manual, folder_path = run_task_2(self.log)
+            processed, manual, folder_path, files_with_warnings = run_task_2(
+                self.log)
 
             if processed > 0 or manual > 0:
                 # Open the task folder
                 if folder_path:
                     os.startfile(folder_path)
 
-                messagebox.showinfo(
-                    "Task 2 Complete",
-                    f"Processing complete!\n{processed} files processed.\n{manual} need manual review.\n\nFolder opened."
-                )
+                # Build message with warning if present
+                message = f"Processing complete!\n{processed} files processed.\n{manual} need manual review."
+                if len(files_with_warnings) > 0:
+                    message += f"\n\n⚠️ {len(files_with_warnings)} file(s) had Abmessung sections with no dimensions:"
+                    for filename in files_with_warnings:
+                        message += f"\n  - {filename}"
+                message += "\n\nFolder opened."
+
+                messagebox.showinfo("Task 2 Complete", message)
             else:
                 messagebox.showwarning("Task 2", "No files were processed.")
 

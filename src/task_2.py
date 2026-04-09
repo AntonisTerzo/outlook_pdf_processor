@@ -1,7 +1,7 @@
 import re
 from pathlib import Path
 from collections import defaultdict, Counter
-from config import TASK2_CITIES, BRASILIEN_SUBCITIES, MANUAL_REVIEW_FALLBACK_CITIES, LYMAN_ELECTRONICS_SUBCITIES
+from config import TASK2_CITIES, BRASILIEN_SUBCITIES, LYMAN_ELECTRONICS_SUBCITIES, MANUAL_REVIEW_FALLBACK_CITIES
 from pdf_utils import extract_city_from_filename_task2, extract_dimensions_from_pdf, check_city_inside_pdf
 from outlook_utils import (
     connect_to_outlook, find_outlook_folder,
@@ -43,6 +43,7 @@ def process_pdf_task2(temp_pdf_path, output_folder, original_filename):
     Extracts city from filename, extracts dimensions, and renames with numbering.
     Special handling:
     - BRASILIEN (not JOINVILLE): Check inside PDF for INDAIATUBA or RIO CLARO
+    - LYMAN ELECTRONICS: Check inside PDF for MAXOLUTION
     - Manual review files: Check inside PDF for TAPUKARA
     Returns dict with 'success' and 'message' keys.
     """
@@ -72,7 +73,7 @@ def process_pdf_task2(temp_pdf_path, output_folder, original_filename):
         # Store dimensions for this file
         dimensions_data[city][count] = dimensions
 
-        # Create filename: "BRASILIEN INDAIATUBA 1.pdf", etc.
+        # Create filename: "BRASILIEN INDAIATUBA 1.pdf", "MAXOLUTION 1.pdf", etc.
         new_filename = f"{city} {count}.pdf"
         final_path = output_folder / new_filename
         temp_pdf_path.rename(final_path)
@@ -232,14 +233,14 @@ def run_task_2(log_func=print):
 
         if not task_folder:
             log_func("Error: Task_2 folder not found in Inbox")
-            return 0, 0, None
+            return 0, 0, None, []
 
         log_func(f"Found folder: {task_folder.Name}")
 
         # Check if there are any emails to process
         if task_folder.Items.Count == 0:
             log_func("\nThere were no emails to process inside Task_2 folder.")
-            return 0, 0, None
+            return 0, 0, None, []
 
         log_func(f"Processing {task_folder.Items.Count} emails\n")
 
@@ -254,6 +255,7 @@ def run_task_2(log_func=print):
 
         total_processed_count = 0
         total_manual_review_count = 0
+        files_with_warnings = []
 
         # Process each email - each gets its own subfolder
         for message in task_folder.Items:
@@ -310,9 +312,25 @@ def run_task_2(log_func=print):
                         if result['success']:
                             log_func(result['message'])
                             processed_count += 1
+                            # Check if message contains dimension warning
+                            if 'WARNING' in result['message']:
+                                # Extract filename from message "Saved as: CITY 1.pdf ..."
+                                saved_filename = result['message'].split(
+                                    'Saved as: ')[1].split(' (')[0]
+                                files_with_warnings.append(saved_filename)
                         else:
                             log_func(result['message'])
                             manual_review_count += 1
+                            # Check if message contains dimension warning
+                            if 'WARNING' in result['message']:
+                                # Extract filename from message
+                                if 'Moved to MANUAL REVIEW:' in result['message']:
+                                    saved_filename = result['message'].split(
+                                        'Moved to MANUAL REVIEW: ')[1].split(' (')[0]
+                                else:
+                                    saved_filename = result['message'].split(
+                                        'Saved as: ')[1].split(' (')[0]
+                                files_with_warnings.append(saved_filename)
 
                 # Create Excel for this email if ANY files were processed OR have dimensions
                 if processed_count > 0 or dimensions_data:
@@ -344,13 +362,13 @@ def run_task_2(log_func=print):
             if not remaining_files:
                 temp_folder.rmdir()
 
-        return total_processed_count, total_manual_review_count, pdf_folder
+        return total_processed_count, total_manual_review_count, pdf_folder, files_with_warnings
 
     except Exception as e:
         log_func(f"\nError: {e}")
         import traceback
         traceback.print_exc()
-        return 0, 0, None
+        return 0, 0, None, []
 
     finally:
         uninitialize_com()
