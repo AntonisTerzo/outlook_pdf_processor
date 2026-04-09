@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 from config import TASK1_CITIES
 from pdf_utils import extract_info_from_pdf_task1, extract_versand_for_tianjin
@@ -13,10 +14,16 @@ def clean_email_subject(subject):
     Clean email subject to be used as folder name.
     Steps:
     1. Strip leading and trailing whitespaces
-    2. Replace dots (.) with underscores (_)
+    2. Replace Windows invalid characters with underscores
+       Invalid characters: < > : " / \ | ? *
     """
+
     cleaned = subject.strip()
-    cleaned = cleaned.replace('.', '_')
+
+    # Replace all Windows invalid characters with underscore
+    invalid_chars = r'[<>:"/\\|?*.]'
+    cleaned = re.sub(invalid_chars, '_', cleaned)
+
     return cleaned
 
 

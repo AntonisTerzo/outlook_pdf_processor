@@ -214,7 +214,6 @@ def extract_dimensions_from_pdf(pdf_path):
 
             # Track Abmessung sections and whether they have dimensions
             in_abmessung_section = False
-            lines_since_header = 0
             current_section_has_dimensions = False
             abmessung_sections_without_dimensions = 0
 
@@ -227,41 +226,43 @@ def extract_dimensions_from_pdf(pdf_path):
 
                     # Start new section
                     in_abmessung_section = True
-                    lines_since_header = 0
                     current_section_has_dimensions = False
                     continue
 
                 if in_abmessung_section:
-                    lines_since_header += 1
-
-                    # Look for dimension pattern in the next 12 lines after header
-                    # This handles page breaks: 5-6 lines at end of page + 2-3 lines at start + dimensions
-                    if lines_since_header <= 12:
-                        dimension_pattern = r'(\d{2,4})[xX](\d{2,4})[xX](\d{2,4})'
-                        matches = re.finditer(dimension_pattern, line)
-
-                        for match in matches:
-                            length_mm = int(match.group(1))
-                            width_mm = int(match.group(2))
-                            height_mm = int(match.group(3))
-
-                            # Convert to centimeters with rounding
-                            length_cm = round_dimension(length_mm)
-                            width_cm = round_dimension(width_mm)
-                            height_cm = round_dimension(height_mm)
-
-                            # Format as "LxWxH"
-                            dimension_str = f"{length_cm}x{width_cm}x{height_cm}"
-                            dimensions.append(dimension_str)
-                            current_section_has_dimensions = True
-
-                    # Check if we've hit another header or section - stop tracking this Abmessung
-                    if 'Colli-Nr' in line or 'Bestellung' in line or lines_since_header > 12:
+                    # Check if we've hit another section header - stop tracking this Abmessung
+                    if 'Colli-Nr' in line or 'Bestellung' in line or 'Pack- und Gewichtsliste' in line:
                         # Before closing section, check if it had dimensions
                         if not current_section_has_dimensions:
                             abmessung_sections_without_dimensions += 1
 
                         in_abmessung_section = False
+                        continue
+
+                    # Check for "variofix" - use fixed dimensions
+                    if 'variofix' in line.lower():
+                        dimensions.append("36x23x19")
+                        current_section_has_dimensions = True
+                        continue
+
+                    # Look for dimension pattern - no line limit, just until next section
+                    dimension_pattern = r'(\d{2,4})[xX](\d{2,4})[xX](\d{2,4})'
+                    matches = re.finditer(dimension_pattern, line)
+
+                    for match in matches:
+                        length_mm = int(match.group(1))
+                        width_mm = int(match.group(2))
+                        height_mm = int(match.group(3))
+
+                        # Convert to centimeters with rounding
+                        length_cm = round_dimension(length_mm)
+                        width_cm = round_dimension(width_mm)
+                        height_cm = round_dimension(height_mm)
+
+                        # Format as "LxWxH"
+                        dimension_str = f"{length_cm}x{width_cm}x{height_cm}"
+                        dimensions.append(dimension_str)
+                        current_section_has_dimensions = True
 
             # Check the last section if we ended while still in one
             if in_abmessung_section and not current_section_has_dimensions:
