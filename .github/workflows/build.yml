@@ -1,0 +1,30 @@
+name: Build EXE
+on:
+  push:
+    branches:
+      - main
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+      
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyinstaller pywin32 openpyxl pypdf
+      
+      - name: Build EXE
+        run: pyinstaller --onefile --windowed --hidden-import win32timezone --hidden-import win32com.client --hidden-import openpyxl --hidden-import pypdf --name outlook_pdf_processor src/main.py
+      
+      - name: Upload EXE as artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: outlook_pdf_processor
+          path: dist/outlook_pdf_processor.exe
