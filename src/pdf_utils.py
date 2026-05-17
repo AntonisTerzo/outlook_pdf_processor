@@ -42,6 +42,35 @@ def extract_versand_for_tianjin(pdf_path):
         return None
 
 
+def check_motors_in_warenempfanger(pdf_path):
+    """
+    Check if "Motors" appears in Warenempfänger section for SUZHOU.
+    Returns True if Motors found, False otherwise.
+    """
+    try:
+        with open(pdf_path, 'rb') as file:
+            pdf_reader = PdfReader(file)
+            text = ""
+            for page in pdf_reader.pages:
+                text += page.extract_text()
+
+            # Find the section after "Warenempfänger:"
+            warenempfanger_match = re.search(
+                r'Warenempfänger:(.*?)(?=Besteller|Lieferkondition:|$)', text, re.DOTALL)
+
+            if warenempfanger_match:
+                warenempfanger_section = warenempfanger_match.group(1)
+                
+                # Check for "Motors"
+                if re.search(r'\bMotors\b', warenempfanger_section, re.IGNORECASE):
+                    return True
+
+            return False
+    except Exception as e:
+        print(f"Error checking Motors for SUZHOU: {e}")
+        return False
+
+
 def extract_info_from_pdf_task1(pdf_path, cities_list):
     """
     Extract city name and document number from PDF for Task 1.
@@ -230,7 +259,7 @@ def extract_dimensions_from_pdf(pdf_path):
                     continue
 
                 if in_abmessung_section:
-                    # Check if we've hit another section header - stop tracking this Abmessung
+                    # Check if we've hit Bestellung section - stop tracking this Abmessung
                     if 'Bestellung' in line:
                         # Before closing section, check if it had dimensions
                         if not current_section_has_dimensions:

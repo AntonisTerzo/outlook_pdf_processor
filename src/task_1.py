@@ -1,7 +1,7 @@
-import re
 from pathlib import Path
+import re
 from config import TASK1_CITIES
-from pdf_utils import extract_info_from_pdf_task1, extract_versand_for_tianjin
+from pdf_utils import extract_info_from_pdf_task1, extract_versand_for_tianjin, check_motors_in_warenempfanger
 from outlook_utils import (
     connect_to_outlook, find_outlook_folder,
     process_msg_file, initialize_com, uninitialize_com,
@@ -10,27 +10,22 @@ from outlook_utils import (
 
 
 def clean_email_subject(subject):
-    """
-    Clean email subject to be used as folder name.
-    Steps:
-    1. Strip leading and trailing whitespaces
-    2. Replace Windows invalid characters with underscores
-       Invalid characters: < > : " / \ | ? *
-    """
-
+    
     cleaned = subject.strip()
-
+    
     # Replace all Windows invalid characters with underscore
     invalid_chars = r'[<>:"/\\|?*.]'
     cleaned = re.sub(invalid_chars, '_', cleaned)
-
+    
     return cleaned
 
 
 def process_pdf_task1(temp_pdf_path, output_folder, original_filename):
     """
     Process a single PDF for Task 1.
-    Special handling for TIANJIN: checks Versand field for specific values.
+    Special handling:
+    - TIANJIN: checks Versand field for specific values
+    - SUZHOU: checks Warenempfänger for "Motors"
     Returns dict with 'success' and 'message' keys.
     """
     city, doc_number = extract_info_from_pdf_task1(temp_pdf_path, TASK1_CITIES)
@@ -44,6 +39,15 @@ def process_pdf_task1(temp_pdf_path, output_folder, original_filename):
                 new_filename = f"{city}_{versand_value}_{doc_number}.pdf"
             else:
                 # No Versand value found, just use TIANJIN
+                new_filename = f"{city}_{doc_number}.pdf"
+        # Special handling for SUZHOU - check for Motors
+        elif city.upper() == "SUZHOU":
+            has_motors = check_motors_in_warenempfanger(temp_pdf_path)
+            if has_motors:
+                # Include Motors in filename: SUZHOU_Motors_12345678.pdf
+                new_filename = f"{city}_Motors_{doc_number}.pdf"
+            else:
+                # No Motors found, just use SUZHOU
                 new_filename = f"{city}_{doc_number}.pdf"
         else:
             # Regular filename for other cities
