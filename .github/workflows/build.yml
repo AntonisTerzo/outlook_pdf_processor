@@ -2,7 +2,7 @@ name: Build EXE
 on:
   push:
     branches:
-      - main
+      - v3
 jobs:
   build:
     runs-on: windows-latest
