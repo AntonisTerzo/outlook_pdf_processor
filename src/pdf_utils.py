@@ -311,40 +311,46 @@ def extract_dimensions_from_pdf(pdf_path):
 
 # ============================================================
 # Task 3 helpers
+#
+# Task 3 does NOT download/save the PDFs. The Outlook attachment is read
+# straight into memory as bytes, so every reader below accepts raw bytes
+# rather than a filesystem path.
+#
+# Only two file types matter: PACKING_LIST and CUSTOMS_CODE. The invoice
+# file is ignored entirely. Everything we need (including the IV value) is
+# read from the packing list and customs-code documents.
 # ============================================================
 
-def _read_pdf_text(pdf_path):
-    """Read full text from PDF. Returns string (empty on error)."""
+import io
+
+
+def _read_pdf_text_from_bytes(pdf_bytes):
+    """Read full text from PDF bytes. Returns string (empty on error)."""
     try:
-        with open(pdf_path, 'rb') as file:
-            pdf_reader = PdfReader(file)
-            return "\n".join(page.extract_text() or "" for page in pdf_reader.pages)
+        pdf_reader = PdfReader(io.BytesIO(pdf_bytes))
+        return "\n".join(page.extract_text() or "" for page in pdf_reader.pages)
     except Exception as e:
-        print(f"Error reading PDF text: {e}")
+        print(f"Error reading PDF text from bytes: {e}")
         return ""
 
 
-def detect_file_type_task3(pdf_path, file_types_map):
+def detect_file_type_task3(pdf_bytes, file_types_map):
     """
-    Detect which of the 3 Task 3 file types a PDF is.
-    file_types_map: dict like {"INVOICE": [...identifiers...], ...}
-    Returns the type key (e.g. "INVOICE") or None if no match.
-    Note: PACKING_LIST and INVOICE share the substring "FACTURA / INVOICE"
-    on the packing-list header, so check PACKING_LIST first.
+    Detect which Task 3 file type a PDF is, from raw bytes.
+    file_types_map: dict like {"PACKING_LIST": [...identifiers...], ...}
+    Returns the type key or None if it is neither (e.g. the invoice file,
+    which we deliberately do not match).
     """
-    text = _read_pdf_text(pdf_path)
+    text = _read_pdf_text_from_bytes(pdf_bytes)
     if not text:
         return None
 
-    # Check in priority order: PACKING_LIST and CUSTOMS_CODE have more specific
-    # headers; INVOICE check comes last because its identifier also appears
-    # on the packing list page.
-    priority = ["PACKING_LIST", "CUSTOMS_CODE", "INVOICE"]
-    for type_key in priority:
+    text_lower = text.lower()
+    for type_key in ("PACKING_LIST", "CUSTOMS_CODE"):
         if type_key not in file_types_map:
             continue
         for identifier in file_types_map[type_key]:
-            if identifier.lower() in text.lower():
+            if identifier.lower() in text_lower:
                 return type_key
     return None
 
@@ -359,19 +365,40 @@ def extract_combo_id_from_filename(filename):
     numbers = re.findall(r'\d+', name)
     if not numbers:
         return None
-    # Longest digit run is the combo identifier
     numbers.sort(key=len, reverse=True)
     return numbers[0]
 
 
-def extract_packing_list_data(pdf_path):
+def _to_cm(value_str):
     """
-    Extract all data needed from a PACKING_LIST PDF.
+    Convert a dimension string (meters, may use comma or dot decimal) to an
+    integer number of centimetres. Examples: '1,20' -> 120, '1.20' -> 120,
+    '0.8' -> 80.
+    """
+    s = value_str.strip()
+    # Normalise decimal separator: if both '.' and ',' present, assume '.' is
+    # thousands and ',' is decimal. Otherwise treat ',' as decimal.
+    if ',' in s and '.' in s:
+        s = s.replace('.', '').replace(',', '.')
+    elif ',' in s:
+        s = s.replace(',', '.')
+    val = float(s)
+    return int(round(val * 100))
+
+
+def extract_packing_list_data(pdf_bytes):
+    """
+    Extract all needed fields from a PACKING_LIST PDF (given as bytes).
+
     Returns dict with keys:
         descriptions (list[str]), iv, srn, pcs, kg, m3, dims
-    Missing fields are None (or empty list for descriptions).
+
+    Parsing approach: the PDF text is split into lines. The cargo descriptions
+    live in a table column headed "Descripción", and that header always sits
+    before "Cod. Modelo / Model id" on the same header row. We capture the
+    description column values between those anchors.
     """
-    text = _read_pdf_text(pdf_path)
+    text = _read_pdf_text_from_bytes(pdf_bytes)
     result = {
         "descriptions": [],
         "iv": None,
@@ -384,88 +411,82 @@ def extract_packing_list_data(pdf_path):
     if not text:
         return result
 
-    # --- IV: after "Factura/Invoice" near the top of the file ---
-    iv_match = re.search(
-        r'Factura\s*/\s*Invoice[^\w\d]*([A-Z0-9\-_/]+)',
-        text, re.IGNORECASE
-    )
-    if iv_match:
-        result["iv"] = iv_match.group(1).strip()
+    lines = [ln.rstrip() for ln in text.split('\n')]
 
-    # --- SRN: after "Nº Envío/Shipment Nr" ---
+    # --- IV: the value after "PO Customer" ---
+    # Look on the same line first, then fall back to the next non-empty line.
+    for i, line in enumerate(lines):
+        m = re.search(r'PO\s*Customer[^\w\d]*([A-Z0-9\-_/]+)', line, re.IGNORECASE)
+        if m and m.group(1).strip():
+            result["iv"] = m.group(1).strip()
+            break
+        if re.search(r'PO\s*Customer', line, re.IGNORECASE):
+            # Value may be on the following line(s)
+            for j in range(i + 1, min(i + 4, len(lines))):
+                nxt = lines[j].strip()
+                if nxt:
+                    token = re.match(r'([A-Z0-9\-_/]+)', nxt, re.IGNORECASE)
+                    if token:
+                        result["iv"] = token.group(1).strip()
+                    break
+            break
+
+    # --- SRN: after "Nº Envío / Shipment Nr" ---
     srn_match = re.search(
-        r'N[ºo°]?\s*Env[ií]o\s*/\s*Shipment\s*Nr[\.:]?\s*([A-Z0-9\-_/]+)',
+        r'Env[ií]o\s*/\s*Shipment\s*Nr\s*[\.:]*\s*([A-Z0-9][A-Z0-9\-_/]*)',
         text, re.IGNORECASE
     )
     if srn_match:
         result["srn"] = srn_match.group(1).strip()
 
-    # --- Descriptions: all values under "Descripción" column ---
-    # Strategy: find each line containing the descripcion header, then read
-    # subsequent rows until we hit RESUMEN/SUMMARY or the end.
-    descripcion_section = re.search(
-        r'Descripci[oó]n(.*?)(?=RESUMEN\s*/\s*SUMMARY|$)',
-        text, re.IGNORECASE | re.DOTALL
-    )
-    if descripcion_section:
-        section_text = descripcion_section.group(1)
-        # Each non-empty line that has some letters is a candidate description.
-        # Skip lines that are purely numeric / dimension rows.
-        candidates = []
-        for raw_line in section_text.split('\n'):
-            line = raw_line.strip()
-            if not line:
-                continue
-            # Skip if it's a pure number/dimension row
-            if re.fullmatch(r'[\d\s\.\,xX]+', line):
-                continue
-            # Skip header-like leftovers
-            if re.search(r'(long|length|anchura|width|altura|height|peso|weight|volumen|volume|bultos|parcels)',
-                         line, re.IGNORECASE):
-                continue
-            # Likely description text
-            if re.search(r'[A-Za-zÀ-ÿ]{3,}', line):
-                candidates.append(line)
-        # Deduplicate while preserving order
-        seen = set()
-        for c in candidates:
-            if c not in seen:
-                seen.add(c)
-                result["descriptions"].append(c)
+    # --- Descriptions: column under "Descripción", which precedes
+    #     "Cod. Modelo / Model id" on the header row. ---
+    result["descriptions"] = _extract_descriptions(lines)
 
-    # --- Summary section ---
+    # --- Summary section (RESUMEN / SUMMARY) for PCS / KG / M3 ---
     summary_match = re.search(
-        r'RESUMEN\s*/\s*SUMMARY(.*)$',
-        text, re.IGNORECASE | re.DOTALL
+        r'RESUMEN\s*/\s*SUMMARY(.*)$', text, re.IGNORECASE | re.DOTALL
     )
     summary_text = summary_match.group(1) if summary_match else text
 
-    # PCS: after "Nº Total de Bultos/Total Nª Parcels"
     pcs_match = re.search(
-        r'N[ºo°]?\s*Total\s*de\s*Bultos\s*/\s*Total\s*N[ºoª°]?\s*Parcels[^\d]*([\d\.,]+)',
+        r'Total\s*N[ºoª°]?\s*Parcels\s*[:.]?\s*(\d[\d\.,]*)',
         summary_text, re.IGNORECASE
     )
+    if not pcs_match:
+        # Fallback: Spanish label "Bultos"
+        pcs_match = re.search(
+            r'Total\s*de\s*Bultos[^\n]*?(\d[\d\.,]*)',
+            summary_text, re.IGNORECASE
+        )
     if pcs_match:
         result["pcs"] = pcs_match.group(1).strip()
 
-    # KG: after "Peso Bruto Total/Total Gross Weight: (Kgs)"
     kg_match = re.search(
-        r'Peso\s*Bruto\s*Total\s*/\s*Total\s*Gross\s*Weight[^\d]*([\d\.,]+)',
+        r'Gross\s*Weight\s*:?\s*\(?\s*Kgs?\s*\)?\s*[:.]?\s*(\d[\d\.,]*)',
         summary_text, re.IGNORECASE
     )
+    if not kg_match:
+        kg_match = re.search(
+            r'Peso\s*Bruto\s*Total[^\n]*?(\d[\d\.,]*)',
+            summary_text, re.IGNORECASE
+        )
     if kg_match:
         result["kg"] = kg_match.group(1).strip()
 
-    # M3: after "Volumen Total/Total Volume: (m3)"
     m3_match = re.search(
-        r'Volumen\s*Total\s*/\s*Total\s*Volume[^\d]*([\d\.,]+)',
+        r'Total\s*Volume\s*:?\s*\(?\s*m3\s*\)?\s*[:.]?\s*(\d[\d\.,]*)',
         summary_text, re.IGNORECASE
     )
+    if not m3_match:
+        m3_match = re.search(
+            r'Volumen\s*Total[^\n]*?(\d[\d\.,]*)',
+            summary_text, re.IGNORECASE
+        )
     if m3_match:
         result["m3"] = m3_match.group(1).strip()
 
-    # --- DIMS: from Long./Length (m) Anchura/Width (m) Altura/Height (m) ---
-    # We grab 3 consecutive numeric values right after that header.
+    # --- DIMS: from Long./Length (m), Anchura/Width (m), Altura/Height (m) ---
     dims_match = re.search(
         r'Long\.?\s*/\s*Length.*?Anchura\s*/\s*Width.*?Altura\s*/\s*Height[^\d]*'
         r'([\d\.,]+)\s+([\d\.,]+)\s+([\d\.,]+)',
@@ -473,18 +494,9 @@ def extract_packing_list_data(pdf_path):
     )
     if dims_match:
         try:
-            # Values are in meters - convert to cm.
-            def to_cm(s):
-                # Replace comma decimal with dot, then convert to float
-                val = float(s.replace('.', '').replace(',', '.')) if ',' in s else float(s)
-                # If value seems already in cm (>10), assume cm; otherwise m->cm
-                if val < 20:
-                    val = val * 100
-                return int(round(val))
-
-            l = to_cm(dims_match.group(1))
-            w = to_cm(dims_match.group(2))
-            h = to_cm(dims_match.group(3))
+            l = _to_cm(dims_match.group(1))
+            w = _to_cm(dims_match.group(2))
+            h = _to_cm(dims_match.group(3))
             result["dims"] = f"{l}x{w}x{h}"
         except Exception as e:
             print(f"Error parsing dims: {e}")
@@ -492,32 +504,98 @@ def extract_packing_list_data(pdf_path):
     return result
 
 
-def extract_hs_codes(pdf_path):
+def _extract_descriptions(lines):
     """
-    Extract HS codes from a CUSTOMS_CODE PDF.
+    Find the descriptions column in the packing-list table.
+
+    The table header contains "Descripción" immediately before
+    "Cod. Modelo / Model id". We locate the header line, then read each
+    subsequent data row until the table ends (RESUMEN / SUMMARY, or a
+    clearly non-table line). On each data row we take the leading text up to
+    the model-id token as the description.
+
+    Returns a list of unique descriptions, comma-joining handled by caller.
+    """
+    descriptions = []
+    seen = set()
+
+    # Locate the header row: "Descripción ... Cod. Modelo / Model id"
+    header_idx = None
+    for i, line in enumerate(lines):
+        if re.search(r'Descripci[oó]n', line, re.IGNORECASE) and \
+           re.search(r'Cod\.?\s*Modelo\s*/\s*Model\s*id', line, re.IGNORECASE):
+            header_idx = i
+            break
+    # Fallback: header where "Descripción" appears and "Model id" is on the
+    # same or the very next line.
+    if header_idx is None:
+        for i, line in enumerate(lines):
+            if re.search(r'Descripci[oó]n', line, re.IGNORECASE):
+                joined = line + " " + (lines[i + 1] if i + 1 < len(lines) else "")
+                if re.search(r'Cod\.?\s*Modelo\s*/\s*Model\s*id', joined, re.IGNORECASE):
+                    header_idx = i
+                    break
+    if header_idx is None:
+        return descriptions
+
+    # Read data rows after the header
+    for line in lines[header_idx + 1:]:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        # Stop at the summary / end of table
+        if re.search(r'RESUMEN\s*/\s*SUMMARY', stripped, re.IGNORECASE):
+            break
+        # Skip pure-number / dimension rows
+        if re.fullmatch(r'[\d\s\.\,xX/-]+', stripped):
+            continue
+        # Skip obvious non-description footer/labels
+        if re.search(r'(Long\.?\s*/\s*Length|Anchura|Altura|Peso\s*Bruto|'
+                     r'Volumen|Bultos|Parcels|N[ºo°]?\s*Env[ií]o|PO\s*Customer)',
+                     stripped, re.IGNORECASE):
+            continue
+
+        # The description is the leading text of the row, sitting in the
+        # column before "Cod. Modelo / Model id". Model ids contain a digit
+        # (e.g. MOD-1234, AB12, 998877). Cut the row at the first token that
+        # looks like a code/quantity (contains a digit), keeping the leading
+        # all-text portion as the description. Purely alphabetic multi-word
+        # descriptions (e.g. "STEEL BOLTS") are preserved in full.
+        desc = stripped
+        cut = re.search(r'\s+\S*\d\S*', stripped)
+        if cut:
+            candidate = stripped[:cut.start()].strip()
+            if len(candidate) >= 3 and re.search(r'[A-Za-zÀ-ÿ]', candidate):
+                desc = candidate
+
+        if re.search(r'[A-Za-zÀ-ÿ]{3,}', desc) and desc not in seen:
+            seen.add(desc)
+            descriptions.append(desc)
+
+    return descriptions
+
+
+def extract_hs_codes(pdf_bytes):
+    """
+    Extract HS codes from a CUSTOMS_CODE PDF (given as bytes).
     Looks for values under "Cod. Arancel / Customs code" and strips dots.
-    Returns a list of unique HS code strings (in order).
+    Returns a list of unique HS code strings, in order of appearance.
     """
-    text = _read_pdf_text(pdf_path)
+    text = _read_pdf_text_from_bytes(pdf_bytes)
     if not text:
         return []
 
-    # Find the section after the customs-code header
     header_match = re.search(
         r'Cod\.?\s*Arancel\s*/\s*Customs\s*code(.*)$',
         text, re.IGNORECASE | re.DOTALL
     )
     section = header_match.group(1) if header_match else text
 
-    # HS codes look like "6403.99.96" or "64039996" - 6-10 digits possibly
-    # interleaved with dots. We accept patterns of digits+dots that resolve
-    # to >=6 digits.
     candidates = re.findall(r'\b\d{2,5}(?:\.\d{1,5}){0,4}\b', section)
     hs_codes = []
     seen = set()
     for cand in candidates:
         digits = cand.replace('.', '')
-        # HS codes are typically 6-10 digits
         if 6 <= len(digits) <= 12 and digits not in seen:
             seen.add(digits)
             hs_codes.append(digits)
@@ -526,12 +604,26 @@ def extract_hs_codes(pdf_path):
 
 def extract_cargo_description_from_subject(subject):
     """
-    Return the word immediately before "CHINA" in the email subject.
-    Case-insensitive. Returns None if not found.
+    Return the word that sits between dashes and immediately before CHINA in
+    the subject. Example: "cheese going to the - world - CHINA" -> "world".
+
+    Strategy: find a "- <text> -" segment that is immediately followed by
+    CHINA, and return the last word of that segment. Falls back to the word
+    directly before CHINA if no dash pattern is found.
     """
     if not subject:
         return None
-    match = re.search(r'(\S+)\s+CHINA\b', subject, re.IGNORECASE)
-    if match:
-        return match.group(1)
+
+    # Primary: "- something - CHINA"  -> last word inside the dashes
+    m = re.search(r'-\s*([^-]+?)\s*-\s*CHINA\b', subject, re.IGNORECASE)
+    if m:
+        inside = m.group(1).strip()
+        if inside:
+            return inside.split()[-1]
+
+    # Fallback: plain word before CHINA
+    m2 = re.search(r'(\S+)\s+CHINA\b', subject, re.IGNORECASE)
+    if m2:
+        return m2.group(1)
+
     return None
