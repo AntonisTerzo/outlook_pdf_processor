@@ -155,7 +155,7 @@ def _build_combo_row(combo_id, combo_files, mail_description, log_func):
         "KG": pl["kg"] or "",
         "M3": pl["m3"] or "",
         "DIMS": pl["dims"] or "",
-        "HS Code": ", ".join(hs_codes) if hs_codes else "",
+        "HS Code": "; ".join(hs_codes) if hs_codes else "",
     }
     return row, notes
 
