@@ -155,10 +155,9 @@ def _build_combo_row(combo_id, combo_files, mail_description, log_func):
         "KG": pl["kg"] or "",
         "M3": pl["m3"] or "",
         "DIMS": pl["dims"] or "",
-        "HS Code": "; ".join(hs_codes) if hs_codes else "",
+        "HS Code": ";".join(hs_codes) if hs_codes else "",
     }
     return row, notes
-
 
 def _create_excel_report(rows, output_folder):
     """Create the consolidated Excel report - one sheet, one row per combo."""
@@ -202,7 +201,6 @@ def _create_excel_report(rows, output_folder):
     ws.freeze_panes = "A2"
     wb.save(excel_path)
     return excel_path
-
 
 def run_task_3(log_func=print):
     """
