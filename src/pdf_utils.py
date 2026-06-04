@@ -488,10 +488,19 @@ def _extract_descriptions_from_tables(tables):
 def _extract_dims_from_tables(tables):
     """
     Find the dimensions table (headers Long./Length, Anchura/Width,
-    Altura/Height) and return 'LxWxH' in cm, or None.
+    Altura/Height) and collect EVERY dimension row.
+
+    Identical dimensions are counted, and each distinct dimension is prefixed
+    with its count as "count-LxWxH". Multiple distinct dimensions are joined
+    by a single space, e.g. "2-80x50x15 1-43x35x31". All values in cm, no
+    internal whitespace within a dimension token. Returns the string or None.
     """
+    from collections import Counter
+
+    ordered = []          # preserves first-seen order of distinct dims
+    counts = Counter()
+
     for table in tables:
-        # Locate the three dimension header columns
         len_col = wid_col = hgt_col = None
         header_row = None
         for r_idx, row in enumerate(table):
@@ -510,7 +519,7 @@ def _extract_dims_from_tables(tables):
         if header_row is None:
             continue
 
-        # First data row under the header carries the values
+        # Read ALL data rows under the header (not just the first).
         for row in table[header_row + 1:]:
             try:
                 l_raw = row[len_col].strip()
@@ -523,18 +532,49 @@ def _extract_dims_from_tables(tables):
             if not all(re.search(r'\d', x) for x in (l_raw, w_raw, h_raw)):
                 continue
             try:
-                return f"{_to_cm(l_raw)}x{_to_cm(w_raw)}x{_to_cm(h_raw)}"
+                dim = f"{_to_cm(l_raw)}x{_to_cm(w_raw)}x{_to_cm(h_raw)}"
             except Exception as e:
                 print(f"Error parsing dims from table: {e}")
                 continue
-    return None
+            if dim not in counts:
+                ordered.append(dim)
+            counts[dim] += 1
+
+    if not ordered:
+        return None
+
+    # Format: "count-LxWxH", joined by single spaces, fully trimmed.
+    parts = [f"{counts[dim]}-{dim}" for dim in ordered]
+    return " ".join(parts)
+
+
+def _number_after_label(cell_text, label_keywords):
+    """
+    Within a single cell, return the numeric value that appears AFTER the
+    label text, ignoring digits that are part of unit markers (m3, m2, kgs).
+    Returns the number string or None.
+    """
+    text = cell_text or ""
+    # Find where the label ends: use the last keyword's position.
+    last_kw = label_keywords[-1]
+    pos = text.lower().rfind(last_kw.lower())
+    search_from = pos + len(last_kw) if pos != -1 else 0
+    tail = text[search_from:]
+    # Remove unit markers so their digits aren't picked up (m3, m2, kgs, etc.)
+    tail = re.sub(r'm\s*[23]\b', ' ', tail, flags=re.IGNORECASE)
+    tail = re.sub(r'\bkgs?\b', ' ', tail, flags=re.IGNORECASE)
+    m = re.search(r'(\d[\d\.,]*)', tail)
+    return m.group(1) if m else None
 
 
 def _summary_value(tables, full_text, *label_keywords):
     """
     Find a summary value (PCS/KG/M3). First look through tables for a row whose
-    label cell matches all keywords and return the adjacent numeric cell. Fall
-    back to a text regex if not found in tables.
+    label cell matches all keywords. The number may sit in a later cell of the
+    same row, or after the label inside the same cell. Falls back to a text
+    regex if not found in tables.
+    Digits embedded in unit markers (the '3' in 'm3', '2' in 'm2', etc.) are
+    ignored so they aren't mistaken for the value.
     """
     # Table-based lookup
     for table in tables:
@@ -547,21 +587,29 @@ def _summary_value(tables, full_text, *label_keywords):
             )
             if label_idx is None:
                 continue
-            # Number may be in the same cell or a later cell in the row
-            same_cell = re.search(r'(\d[\d\.,]*)', row[label_idx])
+            # Prefer a number in a later cell of the same row.
             for later in row[label_idx + 1:]:
-                m = re.search(r'(\d[\d\.,]*)', later or "")
+                cleaned = re.sub(r'm\s*[23]\b', ' ', later or "", flags=re.IGNORECASE)
+                cleaned = re.sub(r'\bkgs?\b', ' ', cleaned, flags=re.IGNORECASE)
+                m = re.search(r'(\d[\d\.,]*)', cleaned)
                 if m:
                     return m.group(1)
-            if same_cell:
-                # only accept same-cell number if nothing follows the label
-                return same_cell.group(1)
+            # Otherwise take the number after the label within the same cell.
+            same = _number_after_label(row[label_idx], list(label_keywords))
+            if same:
+                return same
 
-    # Text fallback: keyword phrase then first number
+    # Text fallback: keyword phrase, then the first number after it,
+    # skipping unit-embedded digits.
     pattern = r'.*?'.join(re.escape(k) for k in label_keywords)
-    m = re.search(pattern + r'[^\d]*(\d[\d\.,]*)', full_text, re.IGNORECASE)
+    m = re.search(pattern, full_text, re.IGNORECASE)
     if m:
-        return m.group(1)
+        tail = full_text[m.end():]
+        tail = re.sub(r'm\s*[23]\b', ' ', tail, flags=re.IGNORECASE)
+        tail = re.sub(r'\bkgs?\b', ' ', tail, flags=re.IGNORECASE)
+        m2 = re.search(r'(\d[\d\.,]*)', tail)
+        if m2:
+            return m2.group(1)
     return None
 
 
@@ -582,9 +630,10 @@ def extract_packing_list_data(pdf_bytes):
     if not text and not tables:
         return result
 
-    # IV: value after "PO Customer"
-    iv_match = re.search(r'PO\s*Customer\s*[:\-]?\s*([A-Z0-9][A-Z0-9\-_/]*)',
-                         text, re.IGNORECASE)
+    # IV: value after "Factura / Invoice"
+    iv_match = re.search(
+        r'Factura\s*/\s*Invoice\s*[:\-]?\s*([A-Z0-9][A-Z0-9\-_/]*)',
+        text, re.IGNORECASE)
     if iv_match:
         result["iv"] = iv_match.group(1).strip()
 
@@ -674,9 +723,10 @@ def extract_hs_codes(pdf_bytes):
 
 def extract_cargo_description_from_subject(subject):
     """
-    Return the word between dashes and immediately before CHINA in the
-    subject. Example: "cheese going to the - world - CHINA" -> "world".
-    Falls back to the plain word before CHINA if no dash pattern is present.
+    Return all the text between the two dashes that come immediately before
+    CHINA in the subject. Example:
+        "shipment - world wide cargo - CHINA" -> "world wide cargo"
+    Falls back to the single word before CHINA if no dash pattern is present.
     """
     if not subject:
         return None
@@ -684,7 +734,7 @@ def extract_cargo_description_from_subject(subject):
     if m:
         inside = m.group(1).strip()
         if inside:
-            return inside.split()[-1]
+            return inside
     m2 = re.search(r'(\S+)\s+CHINA\b', subject, re.IGNORECASE)
     if m2:
         return m2.group(1)
