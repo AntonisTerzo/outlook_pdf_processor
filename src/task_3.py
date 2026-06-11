@@ -8,6 +8,7 @@ from pdf_utils import (
     extract_packing_list_data,
     extract_hs_codes,
     extract_cargo_description_from_subject,
+    set_extraction_logger,
 )
 from outlook_utils import (
     connect_to_outlook, find_outlook_folder,
@@ -129,9 +130,16 @@ def _group_combos(pdfs, log_func):
 def _build_combo_row(combo_id, combo_files, mail_description, log_func):
     """
     Build the 9-column row for a combo. Requires both PACKING_LIST and
-    CUSTOMS_CODE. Returns (row_dict, notes_list); row is None if incomplete.
+    CUSTOMS_CODE. Returns (row_dict, notes_list, missing_fields_list).
+    row is None if a required file is missing entirely.
+
+    For each individual field that could not be extracted, the cell is filled
+    with a visible placeholder ("NOT FOUND - check PDF") and a warning is
+    logged, so a failed extraction is never silently written as a blank or a
+    wrong value.
     """
     notes = []
+    missing_fields = []
     packing = combo_files.get("PACKING_LIST")
     customs = combo_files.get("CUSTOMS_CODE")
 
@@ -141,23 +149,46 @@ def _build_combo_row(combo_id, combo_files, mail_description, log_func):
         notes.append("missing CUSTOMS_CODE")
 
     if packing is None or customs is None:
-        return None, notes
+        return None, notes, missing_fields
 
     pl = extract_packing_list_data(packing)
     hs_codes = extract_hs_codes(customs)
 
+    placeholder = "NOT FOUND - check PDF"
+
+    def field(value, name, *, is_list=False, joiner=", "):
+        """Return the cell value, or a placeholder if missing; log misses."""
+        if is_list:
+            if value:
+                return joiner.join(value)
+        else:
+            if value not in (None, ""):
+                return value
+        missing_fields.append(name)
+        log_func(f"    [WARNING] combo {combo_id}: could not extract {name}")
+        return placeholder
+
     row = {
-        "Cargo Description (Mail)": mail_description or "",
-        "Cargo Description": ", ".join(pl["descriptions"]) if pl["descriptions"] else "",
-        "IV": pl["iv"] or "",
-        "SRN": pl["srn"] or "",
-        "PCS": pl["pcs"] or "",
-        "KG": pl["kg"] or "",
-        "M3": pl["m3"] or "",
-        "DIMS": pl["dims"] or "",
-        "HS Code": ";".join(hs_codes) if hs_codes else "",
+        "Cargo Description (Mail)": mail_description or placeholder,
+        "Cargo Description": field(pl["descriptions"], "Cargo Description", is_list=True),
+        "IV": field(pl["iv"], "IV"),
+        "SRN": field(pl["srn"], "SRN"),
+        "PCS": field(pl["pcs"], "PCS"),
+        "KG": field(pl["kg"], "KG"),
+        "M3": field(pl["m3"], "M3"),
+        "DIMS": field(pl["dims"], "DIMS"),
+        "HS Code": field(hs_codes, "HS Code", is_list=True, joiner=";"),
     }
-    return row, notes
+
+    if not mail_description:
+        missing_fields.append("Cargo Description (Mail)")
+        log_func(f"    [WARNING] combo {combo_id}: could not extract Cargo Description (Mail) from subject")
+
+    if missing_fields:
+        log_func(f"  ! Combo {combo_id}: {len(missing_fields)} field(s) not found: {', '.join(missing_fields)}")
+
+    return row, notes, missing_fields
+
 
 def _create_excel_report(rows, output_folder):
     """Create the consolidated Excel report - one sheet, one row per combo."""
@@ -202,6 +233,7 @@ def _create_excel_report(rows, output_folder):
     wb.save(excel_path)
     return excel_path
 
+
 def run_task_3(log_func=print):
     """
     Task 3:
@@ -210,9 +242,13 @@ def run_task_3(log_func=print):
     - Group PDFs into combos by the longest digit-run in their filename.
     - Each combo needs PACKING_LIST + CUSTOMS_CODE (invoice is ignored).
     - Extract data and write one consolidated Task_3_Report.xlsx to Downloads.
-    Returns: (processed_count, incomplete_combos_list, excel_folder_path)
+    Returns: (processed_count, incomplete_combos, combos_with_missing_fields,
+              excel_folder_path)
     """
     initialize_com()
+    # Route low-level extraction diagnostics (ambiguous/missing values) into
+    # the same log the user sees. Restored in the finally block.
+    _previous_logger = set_extraction_logger(log_func)
 
     try:
         log_func("Task 3: Attempting to connect to Outlook...")
@@ -222,18 +258,19 @@ def run_task_3(log_func=print):
         task_folder = find_outlook_folder(namespace, "Task_3")
         if not task_folder:
             log_func("Error: Task_3 folder not found in Inbox")
-            return 0, [], None
+            return 0, [], [], None
 
         log_func(f"Found folder: {task_folder.Name}")
 
         if task_folder.Items.Count == 0:
             log_func("\nThere were no emails to process inside Task_3 folder.")
-            return 0, [], None
+            return 0, [], [], None
 
         log_func(f"Processing {task_folder.Items.Count} emails\n")
 
         all_rows = []
         incomplete_combos = []  # list of (email_subject, combo_id, notes)
+        combos_with_missing_fields = []  # list of (email_subject, combo_id, missing_fields)
         total_processed = 0
 
         for message in task_folder.Items:
@@ -257,12 +294,17 @@ def run_task_3(log_func=print):
             combos = _group_combos(pdfs, log_func)
 
             for combo_id, files in combos.items():
-                row, notes = _build_combo_row(combo_id, files, mail_description, log_func)
+                row, notes, missing_fields = _build_combo_row(
+                    combo_id, files, mail_description, log_func)
                 if row is None:
                     log_func(f"  ! Combo {combo_id} incomplete: {', '.join(notes)}")
                     incomplete_combos.append((subject_raw, combo_id, notes))
                 else:
-                    log_func(f"  Combo {combo_id}: complete")
+                    if missing_fields:
+                        log_func(f"  Combo {combo_id}: written with {len(missing_fields)} missing field(s)")
+                        combos_with_missing_fields.append((subject_raw, combo_id, missing_fields))
+                    else:
+                        log_func(f"  Combo {combo_id}: complete")
                     all_rows.append(row)
                     total_processed += 1
 
@@ -282,18 +324,23 @@ def run_task_3(log_func=print):
         if excel_folder:
             log_func(f"Location: {excel_folder}")
         if incomplete_combos:
-            log_func(f"\nWARNING: {len(incomplete_combos)} incomplete combo(s):")
+            log_func(f"\nWARNING: {len(incomplete_combos)} incomplete combo(s) (skipped):")
             for subj, cid, notes in incomplete_combos:
                 log_func(f"  - {subj} / combo {cid}: {', '.join(notes)}")
+        if combos_with_missing_fields:
+            log_func(f"\nWARNING: {len(combos_with_missing_fields)} combo(s) written with missing fields:")
+            for subj, cid, fields in combos_with_missing_fields:
+                log_func(f"  - {subj} / combo {cid}: {', '.join(fields)}")
         log_func("=" * 60)
 
-        return total_processed, incomplete_combos, excel_folder
+        return total_processed, incomplete_combos, combos_with_missing_fields, excel_folder
 
     except Exception as e:
         log_func(f"\nError: {e}")
         import traceback
         traceback.print_exc()
-        return 0, [], None
+        return 0, [], [], None
 
     finally:
+        set_extraction_logger(_previous_logger)
         uninitialize_com()
