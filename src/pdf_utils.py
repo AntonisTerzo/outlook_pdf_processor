@@ -333,6 +333,31 @@ _LINES_TABLE_SETTINGS = {
     "horizontal_strategy": "lines",
 }
 
+# --- Extraction logging ---------------------------------------------------
+# Diagnostic messages from the low-level extractors (ambiguous values, missing
+# fields, etc.) are routed through this hook. The caller (task_3.run_task_3)
+# sets it to the GUI/console log function for the duration of a run, so these
+# notes show up in the same log as everything else. Defaults to a no-op.
+_LOG_HOOK = None
+
+
+def set_extraction_logger(log_func):
+    """Install a logging callback used by the Task 3 extractors. Pass None to
+    silence. Returns the previous hook so it can be restored."""
+    global _LOG_HOOK
+    previous = _LOG_HOOK
+    _LOG_HOOK = log_func
+    return previous
+
+
+def _log_extraction(message):
+    """Emit an extraction diagnostic through the installed hook, if any."""
+    if _LOG_HOOK is not None:
+        try:
+            _LOG_HOOK(f"    [extract] {message}")
+        except Exception:
+            pass
+
 
 def _open_plumber(pdf_bytes):
     """Open a pdfplumber document from bytes. Caller must close it."""
@@ -548,33 +573,128 @@ def _extract_dims_from_tables(tables):
     return " ".join(parts)
 
 
-def _number_after_label(cell_text, label_keywords):
+# A "real value" number: at least one digit, may use thousands separators and
+# a decimal part, but must NOT be immediately preceded/followed by a letter or
+# another digit. The guards mean "13m3" will not be read as a bare "13", and
+# "m3" alone yields no match. This replaces the old approach of deleting unit
+# substrings, which could swallow real digits and leave a stray "1" behind.
+_VALUE_RE = re.compile(
+    r'(?<![\dA-Za-z])'
+    r'(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d+)?|\d+(?:[.,]\d+)?)'
+    r'(?![\dA-Za-z])'
+)
+
+# Unit tokens we explicitly skip if the matcher ever lands on one.
+_UNIT_TOKEN_RE = re.compile(r'^(?:m2|m3|kgs?|cm|mm)$', re.IGNORECASE)
+
+
+def _find_value_in_text(text):
     """
-    Within a single cell, return the numeric value that appears AFTER the
-    label text, ignoring digits that are part of unit markers (m3, m2, kgs).
-    Returns the number string or None.
+    Return the first standalone numeric value in `text` that is not part of a
+    unit token, or None. Unit-glued numbers (e.g. the '3' in 'm3') are skipped
+    by the surrounding letter/digit guards in _VALUE_RE.
+    """
+    if not text:
+        return None
+    for m in _VALUE_RE.finditer(text):
+        candidate = m.group(1)
+        if _UNIT_TOKEN_RE.match(candidate):
+            continue
+        return candidate
+    return None
+
+
+def _value_after_label(cell_text, label_keywords):
+    """
+    Return the numeric value appearing AFTER the label text within a single
+    cell, skipping unit markers. Returns the number string or None.
     """
     text = cell_text or ""
-    # Find where the label ends: use the last keyword's position.
     last_kw = label_keywords[-1]
     pos = text.lower().rfind(last_kw.lower())
     search_from = pos + len(last_kw) if pos != -1 else 0
-    tail = text[search_from:]
-    # Remove unit markers so their digits aren't picked up (m3, m2, kgs, etc.)
-    tail = re.sub(r'm\s*[23]\b', ' ', tail, flags=re.IGNORECASE)
-    tail = re.sub(r'\bkgs?\b', ' ', tail, flags=re.IGNORECASE)
-    m = re.search(r'(\d[\d\.,]*)', tail)
-    return m.group(1) if m else None
+    return _find_value_in_text(text[search_from:])
+
+
+def _value_directly_after_label(cell_text, label_keywords):
+    """
+    Return a number ONLY when it sits directly after the label keyword, with
+    just a colon and/or whitespace in between (e.g. "...Parcels : 2"). This is
+    a tight, safe fallback for unit-less summary rows: it will not pick up a
+    digit embedded earlier in the label, and it requires the value to be the
+    immediate next token. Returns the number string or None.
+    """
+    text = cell_text or ""
+    last_kw = label_keywords[-1]
+    pos = text.lower().rfind(last_kw.lower())
+    if pos == -1:
+        return None
+    tail = text[pos + len(last_kw):]
+    # Allow only separators (spaces, colon, the ª/º ordinal, dashes) before the
+    # number; anything else (other words) means the value isn't here.
+    m = re.match(r'[\s:ªº°.\-]*?(\d[\d\.,]*)', tail)
+    if m:
+        candidate = m.group(1)
+        if not _UNIT_TOKEN_RE.match(candidate):
+            return candidate
+    return None
+
+
+def _value_after_unit(cell_text):
+    """
+    For a same-cell layout where the label, a unit marker and the value all
+    live in ONE cell (e.g. "Total Volume: (m3) 2,15" or
+    "Total Gross Weight: (Kgs) 345,5"), return the numeric value that appears
+    AFTER the last unit marker. Returns the number string, or None if there is
+    no unit marker or no number follows it.
+
+    Anchoring on the unit marker is what prevents the '3' inside '(m3)' (or a
+    stray digit inside the label text) from being mistaken for the value.
+    """
+    text = cell_text or ""
+    # Find the LAST unit marker in the cell: m3, m2, kgs, kg, cm, mm.
+    last_pos = -1
+    for um in re.finditer(r'\b(?:m3|m2|kgs?|cm|mm)\b', text, re.IGNORECASE):
+        last_pos = um.end()
+    if last_pos == -1:
+        # No unit marker -> we can't safely separate value from label text.
+        return None
+    return _find_value_in_text(text[last_pos:])
+
+
+def _cell_is_value(cell_text):
+    """
+    True if the cell looks like a VALUE cell (its content is essentially just a
+    number, possibly with a unit or surrounding punctuation) rather than a label
+    cell that merely happens to contain a stray digit.
+
+    A value cell, once unit tokens and punctuation are removed, should be empty
+    apart from the number itself. This rejects things like "Peso (Kgs) 1" where
+    the 1 is a structural artifact next to a long textual label.
+    """
+    if not cell_text:
+        return False
+    # Strip unit words/markers and punctuation, keep words and numbers.
+    stripped = re.sub(r'\b(?:m2|m3|kgs?|cm|mm|nr|no|total|parcels|bultos|'
+                      r'peso|bruto|gross|weight|volumen|volume|envio|envío)\b',
+                      ' ', cell_text, flags=re.IGNORECASE)
+    stripped = re.sub(r'[^\w,.\s]', ' ', stripped)   # drop ()/: etc.
+    # Remaining alphabetic words mean this is a label, not a value cell.
+    if re.search(r'[A-Za-zÀ-ÿ]', stripped):
+        return False
+    return _find_value_in_text(stripped) is not None
 
 
 def _summary_value(tables, full_text, *label_keywords):
     """
-    Find a summary value (PCS/KG/M3). First look through tables for a row whose
-    label cell matches all keywords. The number may sit in a later cell of the
-    same row, or after the label inside the same cell. Falls back to a text
-    regex if not found in tables.
-    Digits embedded in unit markers (the '3' in 'm3', '2' in 'm2', etc.) are
-    ignored so they aren't mistaken for the value.
+    Find a summary value (PCS/KG/M3). Looks through tables for a row whose label
+    cell matches all keywords, then reads the value from a SEPARATE value cell
+    in that row (a cell whose content is essentially just a number).
+
+    Returns the raw number string, or None if no plausible VALUE cell was found.
+    A stray digit glued into the label cell, or a non-numeric cell, is NOT
+    accepted as a value - in that case None is returned so the caller can log
+    the miss and mark the Excel cell, instead of silently emitting a wrong 1.
     """
     # Table-based lookup
     for table in tables:
@@ -587,29 +707,50 @@ def _summary_value(tables, full_text, *label_keywords):
             )
             if label_idx is None:
                 continue
-            # Prefer a number in a later cell of the same row.
-            for later in row[label_idx + 1:]:
-                cleaned = re.sub(r'm\s*[23]\b', ' ', later or "", flags=re.IGNORECASE)
-                cleaned = re.sub(r'\bkgs?\b', ' ', cleaned, flags=re.IGNORECASE)
-                m = re.search(r'(\d[\d\.,]*)', cleaned)
-                if m:
-                    return m.group(1)
-            # Otherwise take the number after the label within the same cell.
-            same = _number_after_label(row[label_idx], list(label_keywords))
-            if same:
+            # Look at LATER cells: collect every cell that looks like a value.
+            # Totals sit at the END of the row, and stray structural digits
+            # (column markers, footnote refs) tend to appear in the middle, so
+            # we prefer the RIGHTMOST value cell. If more than one distinct
+            # value is present we still take the rightmost but flag ambiguity
+            # via the module logger so the caller can surface it.
+            value_cells = [later for later in row[label_idx + 1:]
+                           if _cell_is_value(later)]
+            if value_cells:
+                chosen = _find_value_in_text(value_cells[-1])
+                distinct = {_find_value_in_text(c) for c in value_cells}
+                if len(distinct) > 1:
+                    _log_extraction(
+                        f"ambiguous value for {'/'.join(label_keywords)}: "
+                        f"candidates {sorted(distinct)}, chose {chosen!r}"
+                    )
+                return chosen
+            # No separate value cell. Some layouts put the value in the SAME
+            # cell, after the unit marker, e.g. "Total Volume: (m3) 2,15".
+            # Accept a number that appears AFTER the last unit marker in the
+            # cell; this is the legitimate single-cell layout.
+            same = _value_after_unit(row[label_idx])
+            if same is not None:
                 return same
+            # Some rows have no unit marker at all (e.g. the parcels count
+            # "Total Nª Parcels : 2"). For these, take the number that follows
+            # the label keyword directly, but ONLY if it appears right after the
+            # keyword (allowing a ':' or spaces between), so we never pick up a
+            # stray digit from elsewhere in the label text.
+            after = _value_directly_after_label(row[label_idx], list(label_keywords))
+            if after is not None:
+                return after
+            return None
 
-    # Text fallback: keyword phrase, then the first number after it,
-    # skipping unit-embedded digits.
+    # Text fallback: locate the keyword phrase, then take the first standalone
+    # number ON THE SAME LINE, but only if that number is preceded by a value
+    # separator (':' or whitespace after the unit), not glued to other text.
     pattern = r'.*?'.join(re.escape(k) for k in label_keywords)
     m = re.search(pattern, full_text, re.IGNORECASE)
     if m:
-        tail = full_text[m.end():]
-        tail = re.sub(r'm\s*[23]\b', ' ', tail, flags=re.IGNORECASE)
-        tail = re.sub(r'\bkgs?\b', ' ', tail, flags=re.IGNORECASE)
-        m2 = re.search(r'(\d[\d\.,]*)', tail)
-        if m2:
-            return m2.group(1)
+        same_line = full_text[m.end():].split('\n', 1)[0]
+        val = _find_value_in_text(same_line)
+        if val:
+            return val
     return None
 
 
@@ -660,6 +801,23 @@ def extract_packing_list_data(pdf_bytes):
 
     # Dimensions
     result["dims"] = _extract_dims_from_tables(tables)
+
+    # Record and log any fields we could not extract, so the caller can both
+    # warn the user and write a marker into the corresponding Excel cell rather
+    # than leaving it blank or emitting a wrong value silently.
+    field_labels = {
+        "descriptions": "Cargo Description",
+        "iv": "IV", "srn": "SRN", "pcs": "PCS",
+        "kg": "KG", "m3": "M3", "dims": "DIMS",
+    }
+    missing = []
+    for key, label in field_labels.items():
+        value = result[key]
+        is_empty = (value is None) or (value == "") or (value == [])
+        if is_empty:
+            missing.append(label)
+            _log_extraction(f"could not extract {label}")
+    result["_missing"] = missing
 
     return result
 
