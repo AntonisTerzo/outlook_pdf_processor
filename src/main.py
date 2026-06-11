@@ -224,7 +224,7 @@ class OutlookProcessorGUI:
     def run_task_3(self):
         """Run Task 3 processor"""
         try:
-            processed, incomplete_combos, folder_path = run_task_3(self.log)
+            processed, incomplete_combos, missing_field_combos, folder_path = run_task_3(self.log)
 
             if folder_path is None and processed == 0 and not incomplete_combos:
                 # Task_3 folder missing OR no emails - run_task_3 already logged details
@@ -239,15 +239,27 @@ class OutlookProcessorGUI:
                 os.startfile(folder_path)
 
             message = f"Processing complete!\n{processed} combo(s) written to the Excel report."
+
             if incomplete_combos:
-                message += f"\n\n⚠️ {len(incomplete_combos)} incomplete combo(s):"
-                # Show at most 10 to keep the dialog readable
+                message += f"\n\n⚠️ {len(incomplete_combos)} incomplete combo(s) skipped:"
                 shown = incomplete_combos[:10]
                 for subj, cid, notes in shown:
                     short_subj = subj if len(subj) <= 40 else subj[:40] + "..."
                     message += f"\n  - {short_subj} / {cid}: {', '.join(notes)}"
                 if len(incomplete_combos) > len(shown):
                     message += f"\n  ...and {len(incomplete_combos) - len(shown)} more (see log)"
+
+            if missing_field_combos:
+                message += (f"\n\n⚠️ {len(missing_field_combos)} combo(s) written but had "
+                            f"field(s) that could not be extracted (marked 'NOT FOUND - check PDF' "
+                            f"in the Excel):")
+                shown = missing_field_combos[:10]
+                for subj, cid, fields in shown:
+                    short_subj = subj if len(subj) <= 40 else subj[:40] + "..."
+                    message += f"\n  - {short_subj} / {cid}: {', '.join(fields)}"
+                if len(missing_field_combos) > len(shown):
+                    message += f"\n  ...and {len(missing_field_combos) - len(shown)} more (see log)"
+
             message += "\n\nFolder opened."
 
             messagebox.showinfo("Task 3 Complete", message)
@@ -276,7 +288,7 @@ if __name__ == "__main__":
     elif len(sys.argv) > 1 and sys.argv[1] == "--task3":
         # Command line mode - Task 3
         print("Starting Task 3...")
-        processed, incomplete, folder = run_task_3()
+        processed, incomplete, missing_fields, folder = run_task_3()
         print("Done!")
     else:
         # GUI mode (default)
