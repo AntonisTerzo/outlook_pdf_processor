@@ -805,14 +805,36 @@ def extract_packing_list_data(pdf_bytes):
     if not text and not tables:
         return result
 
-
-    for line in text.split("\n"):
-        m = re.search(
-            r'Factura\s*/\s*Invoice\s*[:\-]?\s*([A-Za-z0-9][A-Za-z0-9_\-]*)',
-            line, re.IGNORECASE)
-        if m:
-            result["iv"] = m.group(1).strip()
+    # IV: value after the invoice label. The label is EITHER "Factura /
+    # Invoice" (with or without spaces around the slash, with or without a
+    # colon) OR "Proforma" - some documents use a proforma instead of an
+    # invoice, with the value (e.g. "PRO_INT_259838") in the same position.
+    # The value (letters, digits, underscores, dashes - it does NOT have to
+    # start with any particular prefix) may sit on the SAME line after a gap,
+    # OR on the NEXT line when the label and value fall into different columns
+    # and pdfplumber splits them.
+    label_re = r'(?:Factura\s*/\s*Invoice|Proforma)\s*[:\-]?\s*'
+    value_re = r'([A-Za-z0-9][A-Za-z0-9_\-]*)'
+    text_lines = text.split("\n")
+    for idx, line in enumerate(text_lines):
+        lm = re.search(label_re, line, re.IGNORECASE)
+        if not lm:
+            continue
+        # Try the remainder of the SAME line first.
+        same = re.match(value_re, line[lm.end():].strip())
+        if same:
+            result["iv"] = same.group(1).strip()
             break
+        # Otherwise take the first non-empty following line's leading token.
+        for nxt in text_lines[idx + 1: idx + 4]:
+            nxt = nxt.strip()
+            if not nxt:
+                continue
+            nm = re.match(value_re, nxt)
+            if nm:
+                result["iv"] = nm.group(1).strip()
+            break
+        break
 
     # SRN: value after "Envío / Shipment Nr"
     srn_match = re.search(
@@ -824,6 +846,20 @@ def extract_packing_list_data(pdf_bytes):
     # Descriptions: from the cargo table
     result["descriptions"] = _extract_descriptions_from_tables(tables)
 
+    # Summary fields.
+    #
+    # The summary block reliably renders one "label ... value" pair per line in
+    # the raw text, e.g.:
+    #     "Volumen Total/Total Volume: (m3) 5,207"
+    #     "Peso Bruto Total/Total Gross Weight: (Kgs) 591,47"
+    # We match each field on its DISTINCTIVE phrase and take the number from the
+    # SAME line. This avoids the failure mode where the table splits the summary
+    # into one stacked-label cell and one stacked-value cell, which makes every
+    # field read the first value (the parcel count) by mistake.
+    #
+    # Note the ordering hazard: "Net Weight" also ends in "(Kgs)", so the KG
+    # field must anchor on "gross"/"bruto" specifically, never on "weight"/
+    # "(kgs)" alone.
     result["pcs"] = _summary_value_from_line(text, "parcels") \
         or _summary_value_from_line(text, "bultos") \
         or _summary_value(tables, text, "parcels") \
