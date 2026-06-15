@@ -805,9 +805,7 @@ def extract_packing_list_data(pdf_bytes):
     if not text and not tables:
         return result
 
-    # IV: value after "Factura / Invoice" on the SAME line. The value can be
-    # any token of letters, digits, underscores and dashes - it does NOT have
-    # to start with "FAC"; we take whatever token follows the label.
+
     for line in text.split("\n"):
         m = re.search(
             r'Factura\s*/\s*Invoice\s*[:\-]?\s*([A-Za-z0-9][A-Za-z0-9_\-]*)',
@@ -826,20 +824,6 @@ def extract_packing_list_data(pdf_bytes):
     # Descriptions: from the cargo table
     result["descriptions"] = _extract_descriptions_from_tables(tables)
 
-    # Summary fields.
-    #
-    # The summary block reliably renders one "label ... value" pair per line in
-    # the raw text, e.g.:
-    #     "Volumen Total/Total Volume: (m3) 5,207"
-    #     "Peso Bruto Total/Total Gross Weight: (Kgs) 591,47"
-    # We match each field on its DISTINCTIVE phrase and take the number from the
-    # SAME line. This avoids the failure mode where the table splits the summary
-    # into one stacked-label cell and one stacked-value cell, which makes every
-    # field read the first value (the parcel count) by mistake.
-    #
-    # Note the ordering hazard: "Net Weight" also ends in "(Kgs)", so the KG
-    # field must anchor on "gross"/"bruto" specifically, never on "weight"/
-    # "(kgs)" alone.
     result["pcs"] = _summary_value_from_line(text, "parcels") \
         or _summary_value_from_line(text, "bultos") \
         or _summary_value(tables, text, "parcels") \
