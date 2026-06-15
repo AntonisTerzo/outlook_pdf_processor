@@ -9,6 +9,7 @@ from pdf_utils import (
     extract_hs_codes,
     extract_cargo_description_from_subject,
     set_extraction_logger,
+    dump_pdf_extraction,
 )
 from outlook_utils import (
     connect_to_outlook, find_outlook_folder,
@@ -17,6 +18,14 @@ from outlook_utils import (
 )
 import openpyxl
 from openpyxl.styles import Font, Alignment, PatternFill
+
+# --- Troubleshooting switch -------------------------------------------------
+# When True, Task 3 writes a "Task_3_DEBUG.txt" file to the Downloads folder
+# containing exactly what pdfplumber extracts from every packing list (raw
+# text + all table cells). This is for diagnosing extraction problems and has
+# no effect on the Excel output. Set back to False for normal use.
+DEBUG_DUMP = True
+_debug_chunks = []
 
 
 def _read_attachment_bytes(attachment):
@@ -121,6 +130,11 @@ def _group_combos(pdfs, log_func):
         if combos[combo_id][file_type] is None:
             combos[combo_id][file_type] = data
             log_func(f"  {filename} -> combo {combo_id} / {file_type}")
+            # Diagnostic: capture what pdfplumber sees for packing lists.
+            if DEBUG_DUMP and file_type == "PACKING_LIST":
+                _debug_chunks.append(
+                    dump_pdf_extraction(data, label=f"{filename} (combo {combo_id})")
+                )
         else:
             log_func(f"  ! Duplicate {file_type} in combo {combo_id}: {filename} (keeping first)")
 
@@ -249,6 +263,7 @@ def run_task_3(log_func=print):
     # Route low-level extraction diagnostics (ambiguous/missing values) into
     # the same log the user sees. Restored in the finally block.
     _previous_logger = set_extraction_logger(log_func)
+    _debug_chunks.clear()
 
     try:
         log_func("Task 3: Attempting to connect to Outlook...")
@@ -317,6 +332,18 @@ def run_task_3(log_func=print):
             excel_path = _create_excel_report(all_rows, excel_folder)
             if excel_path:
                 log_func(f"Excel report created: {excel_path}")
+
+        # Write the diagnostic dump (if enabled) to Downloads so it can be
+        # inspected without needing Python installed.
+        if DEBUG_DUMP and _debug_chunks:
+            try:
+                downloads = Path.home() / "Downloads"
+                debug_path = downloads / "Task_3_DEBUG.txt"
+                with open(debug_path, "w", encoding="utf-8") as f:
+                    f.write("\n\n".join(_debug_chunks))
+                log_func(f"\nDEBUG dump written to: {debug_path}")
+            except Exception as e:
+                log_func(f"\nCould not write DEBUG dump: {e}")
 
         log_func("\n" + "=" * 60)
         log_func("Task 3 Processing complete")
