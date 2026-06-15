@@ -378,63 +378,6 @@ def _read_pdf_text_from_bytes(pdf_bytes):
         return ""
 
 
-def dump_pdf_extraction(pdf_bytes, label=""):
-    """
-    Build a human-readable diagnostic report of exactly what pdfplumber
-    extracts from a PDF: the raw text (line by line) and every table (row by
-    row, cell by cell), using BOTH the lines strategy and the text strategy.
-
-    This is a troubleshooting aid - it does not affect normal extraction. The
-    caller can write the returned string to a file for inspection.
-    """
-    lines_out = []
-    lines_out.append("=" * 70)
-    lines_out.append(f"DIAGNOSTIC DUMP: {label}")
-    lines_out.append("=" * 70)
-
-    text_settings = {"vertical_strategy": "text", "horizontal_strategy": "text"}
-
-    try:
-        with _open_plumber(pdf_bytes) as pdf:
-            lines_out.append(f"Pages: {len(pdf.pages)}")
-            for pno, page in enumerate(pdf.pages):
-                lines_out.append("")
-                lines_out.append("#" * 70)
-                lines_out.append(f"# PAGE {pno + 1}")
-                lines_out.append("#" * 70)
-
-                lines_out.append("")
-                lines_out.append("----- RAW TEXT (text-fallback sees this) -----")
-                text = page.extract_text() or ""
-                for i, line in enumerate(text.split("\n")):
-                    lines_out.append(f"  {i:3} | {line!r}")
-
-                lines_out.append("")
-                lines_out.append("----- TABLES (lines strategy) -----")
-                tbls = page.extract_tables(_LINES_TABLE_SETTINGS)
-                if not tbls:
-                    lines_out.append("  (none)")
-                for ti, tbl in enumerate(tbls):
-                    lines_out.append(f"  TABLE {ti}:")
-                    for ri, row in enumerate(tbl):
-                        lines_out.append(f"    row {ri}: {row}")
-
-                lines_out.append("")
-                lines_out.append("----- TABLES (text strategy) -----")
-                tbls_t = page.extract_tables(text_settings)
-                if not tbls_t:
-                    lines_out.append("  (none)")
-                for ti, tbl in enumerate(tbls_t):
-                    lines_out.append(f"  TABLE {ti}:")
-                    for ri, row in enumerate(tbl):
-                        lines_out.append(f"    row {ri}: {row}")
-    except Exception as e:
-        lines_out.append(f"ERROR during dump: {e}")
-
-    lines_out.append("")
-    return "\n".join(lines_out)
-
-
 def _all_tables(pdf_bytes):
     """
     Return every table on every page as a list of tables, each a list of rows,
@@ -862,12 +805,16 @@ def extract_packing_list_data(pdf_bytes):
     if not text and not tables:
         return result
 
-    # IV: value after "Factura / Invoice"
-    iv_match = re.search(
-        r'Factura\s*/\s*Invoice\s*[:\-]?\s*([A-Z0-9][A-Z0-9\-_/]*)',
-        text, re.IGNORECASE)
-    if iv_match:
-        result["iv"] = iv_match.group(1).strip()
+    # IV: value after "Factura / Invoice" on the SAME line. The value can be
+    # any token of letters, digits, underscores and dashes - it does NOT have
+    # to start with "FAC"; we take whatever token follows the label.
+    for line in text.split("\n"):
+        m = re.search(
+            r'Factura\s*/\s*Invoice\s*[:\-]?\s*([A-Za-z0-9][A-Za-z0-9_\-]*)',
+            line, re.IGNORECASE)
+        if m:
+            result["iv"] = m.group(1).strip()
+            break
 
     # SRN: value after "Envío / Shipment Nr"
     srn_match = re.search(
