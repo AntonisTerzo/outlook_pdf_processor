@@ -742,6 +742,40 @@ def _cell_is_value(cell_text):
     return _find_value_in_text(stripped) is not None
 
 
+def _summary_value_from_line(full_text, phrase):
+    """
+    Find the line in the raw text that contains `phrase` (case-insensitive,
+    spaces flexible) and return the numeric value on that SAME line, taken from
+    AFTER the phrase. Unit-embedded digits (the '3' in 'm3', '2' in 'm2') and
+    the unit word 'kgs' are stripped so they aren't mistaken for the value.
+
+    This is the primary summary extractor: in these packing lists each summary
+    label and its value sit on one text line, so matching the line by its
+    distinctive phrase and reading the trailing number is both simple and
+    immune to the stacked-cell table layout. Returns the number string or None.
+    """
+    if not full_text:
+        return None
+
+    # Build a flexible regex for the phrase: collapse its spaces to \s* so
+    # "gross weight" matches "Gross Weight:" etc.
+    phrase_re = r'\s*'.join(re.escape(tok) for tok in phrase.split())
+
+    for line in full_text.split("\n"):
+        if not re.search(phrase_re, line, re.IGNORECASE):
+            continue
+        # Take the part of the line AFTER the matched phrase.
+        m = re.search(phrase_re, line, re.IGNORECASE)
+        tail = line[m.end():]
+        # Remove unit markers so their digits aren't picked up.
+        tail = re.sub(r'm\s*[23]\b', ' ', tail, flags=re.IGNORECASE)
+        tail = re.sub(r'\bkgs?\b', ' ', tail, flags=re.IGNORECASE)
+        num = re.search(r'(\d[\d\.,]*)', tail)
+        if num:
+            return num.group(1)
+    return None
+
+
 def _summary_value(tables, full_text, *label_keywords):
     """
     Find a summary value (PCS/KG/M3). Looks through tables for a row whose label
@@ -845,16 +879,34 @@ def extract_packing_list_data(pdf_bytes):
     # Descriptions: from the cargo table
     result["descriptions"] = _extract_descriptions_from_tables(tables)
 
-    # Summary fields
-    result["pcs"] = _summary_value(tables, text, "parcels")
-    if not result["pcs"]:
-        result["pcs"] = _summary_value(tables, text, "bultos")
-    result["kg"] = _summary_value(tables, text, "gross", "weight")
-    if not result["kg"]:
-        result["kg"] = _summary_value(tables, text, "peso", "bruto")
-    result["m3"] = _summary_value(tables, text, "total", "volume")
-    if not result["m3"]:
-        result["m3"] = _summary_value(tables, text, "volumen")
+    # Summary fields.
+    #
+    # The summary block reliably renders one "label ... value" pair per line in
+    # the raw text, e.g.:
+    #     "Volumen Total/Total Volume: (m3) 5,207"
+    #     "Peso Bruto Total/Total Gross Weight: (Kgs) 591,47"
+    # We match each field on its DISTINCTIVE phrase and take the number from the
+    # SAME line. This avoids the failure mode where the table splits the summary
+    # into one stacked-label cell and one stacked-value cell, which makes every
+    # field read the first value (the parcel count) by mistake.
+    #
+    # Note the ordering hazard: "Net Weight" also ends in "(Kgs)", so the KG
+    # field must anchor on "gross"/"bruto" specifically, never on "weight"/
+    # "(kgs)" alone.
+    result["pcs"] = _summary_value_from_line(text, "parcels") \
+        or _summary_value_from_line(text, "bultos") \
+        or _summary_value(tables, text, "parcels") \
+        or _summary_value(tables, text, "bultos")
+
+    result["kg"] = _summary_value_from_line(text, "gross weight") \
+        or _summary_value_from_line(text, "peso bruto") \
+        or _summary_value(tables, text, "gross", "weight") \
+        or _summary_value(tables, text, "peso", "bruto")
+
+    result["m3"] = _summary_value_from_line(text, "volume") \
+        or _summary_value_from_line(text, "volumen") \
+        or _summary_value(tables, text, "total", "volume") \
+        or _summary_value(tables, text, "volumen")
 
     # Dimensions
     result["dims"] = _extract_dims_from_tables(tables)
