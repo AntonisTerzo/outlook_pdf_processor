@@ -129,14 +129,19 @@ def _group_combos(pdfs, log_func):
 
 def _build_combo_row(combo_id, combo_files, mail_description, log_func):
     """
-    Build the 9-column row for a combo. Requires both PACKING_LIST and
-    CUSTOMS_CODE. Returns (row_dict, notes_list, missing_fields_list).
-    row is None if a required file is missing entirely.
+    Build the 9-column row for a combo.
 
-    For each individual field that could not be extracted, the cell is filled
-    with a visible placeholder ("NOT FOUND - check PDF") and a warning is
-    logged, so a failed extraction is never silently written as a blank or a
-    wrong value.
+    PACKING_LIST is required. CUSTOMS_CODE is NOT required: if it is missing
+    but the packing list is present, the row is still produced with every
+    packing-list field filled in, and only the HS Code cell carries the
+    "NOT FOUND - check PDF" placeholder (that single cell is shaded red).
+
+    For any packing-list field that cannot be extracted (description, IV, SRN,
+    PCS, KG, M3, DIMS), the cell gets the placeholder AND the ENTIRE row is
+    shaded red so the user can spot it at a glance.
+
+    Returns (row_dict, notes_list, missing_fields_list). row is None only when
+    the PACKING_LIST itself is missing (nothing to build from).
     """
     notes = []
     missing_fields = []
@@ -145,19 +150,20 @@ def _build_combo_row(combo_id, combo_files, mail_description, log_func):
 
     if packing is None:
         notes.append("missing PACKING_LIST")
-    if customs is None:
-        notes.append("missing CUSTOMS_CODE")
-
-    if packing is None or customs is None:
+        # Without a packing list there is nothing to build the row from.
         return None, notes, missing_fields
 
     pl = extract_packing_list_data(packing)
-    hs_codes = extract_hs_codes(customs)
 
     placeholder = "NOT FOUND - check PDF"
 
+    # Tracks which fields triggered a whole-row warning (packing-list misses).
+    row_red = False
+
     def field(value, name, *, is_list=False, joiner=", "):
-        """Return the cell value, or a placeholder if missing; log misses."""
+        """Return the cell value, or a placeholder if missing; log misses and
+        flag the row for red shading (packing-list fields only)."""
+        nonlocal row_red
         if is_list:
             if value:
                 return joiner.join(value)
@@ -165,8 +171,30 @@ def _build_combo_row(combo_id, combo_files, mail_description, log_func):
             if value not in (None, ""):
                 return value
         missing_fields.append(name)
+        row_red = True
         log_func(f"    [WARNING] combo {combo_id}: could not extract {name}")
         return placeholder
+
+    # HS Code comes from the CUSTOMS_CODE file. If that file is absent we still
+    # write the row, but the HS cell alone is marked (not the whole row).
+    hs_only_red = False
+    if customs is None:
+        notes.append("missing CUSTOMS_CODE")
+        hs_value = placeholder
+        hs_only_red = True
+        missing_fields.append("HS Code (no customs file)")
+        log_func(f"    [WARNING] combo {combo_id}: no CUSTOMS_CODE file - HS Code not available")
+    else:
+        hs_codes = extract_hs_codes(customs)
+        if hs_codes:
+            hs_value = ";".join(hs_codes)
+        else:
+            # Customs file present but no codes found inside -> treat like a
+            # missing packing-list field: placeholder + whole-row red.
+            hs_value = placeholder
+            missing_fields.append("HS Code")
+            row_red = True
+            log_func(f"    [WARNING] combo {combo_id}: could not extract HS Code")
 
     row = {
         "Cargo Description (Mail)": mail_description or placeholder,
@@ -177,12 +205,20 @@ def _build_combo_row(combo_id, combo_files, mail_description, log_func):
         "KG": field(pl["kg"], "KG"),
         "M3": field(pl["m3"], "M3"),
         "DIMS": field(pl["dims"], "DIMS"),
-        "HS Code": field(hs_codes, "HS Code", is_list=True, joiner=";"),
+        "HS Code": hs_value,
     }
 
     if not mail_description:
         missing_fields.append("Cargo Description (Mail)")
+        row_red = True
         log_func(f"    [WARNING] combo {combo_id}: could not extract Cargo Description (Mail) from subject")
+
+    # Colour instructions for the Excel writer:
+    #   row["_row_red"]    -> shade the whole row red
+    #   row["_hs_cell_red"]-> shade only the HS Code cell red
+    # (whole-row red supersedes the single-cell case)
+    row["_row_red"] = row_red
+    row["_hs_cell_red"] = hs_only_red and not row_red
 
     if missing_fields:
         log_func(f"  ! Combo {combo_id}: {len(missing_fields)} field(s) not found: {', '.join(missing_fields)}")
@@ -215,15 +251,28 @@ def _create_excel_report(rows, output_folder):
     header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
     header_font = Font(bold=True, color="FFFFFF")
 
+    # Red shading for missing data.
+    red_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+
     for col_idx, header in enumerate(headers, start=1):
         cell = ws.cell(row=1, column=col_idx, value=header)
         cell.fill = header_fill
         cell.font = header_font
         cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
 
+    hs_col_idx = headers.index("HS Code") + 1  # 1-based column of HS Code
+
     for row_idx, row in enumerate(rows, start=2):
+        row_red = row.get("_row_red", False)
+        hs_cell_red = row.get("_hs_cell_red", False)
         for col_idx, header in enumerate(headers, start=1):
-            ws.cell(row=row_idx, column=col_idx, value=row.get(header, ""))
+            cell = ws.cell(row=row_idx, column=col_idx, value=row.get(header, ""))
+            if row_red:
+                # A packing-list field was missing: shade the entire row.
+                cell.fill = red_fill
+            elif hs_cell_red and col_idx == hs_col_idx:
+                # Only the HS Code is missing (no customs file): shade just it.
+                cell.fill = red_fill
 
     widths = {"A": 25, "B": 40, "C": 18, "D": 18, "E": 10, "F": 12, "G": 12, "H": 18, "I": 30}
     for col, width in widths.items():
