@@ -9,13 +9,14 @@ import sys
 # Import tasks
 from task_1 import run_task_1
 from task_2 import run_task_2
+from task_3 import run_task_3
 
 
 class OutlookProcessorGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("Outlook PDF Processor v2.0")
-        self.root.geometry("650x500")
+        self.root.title("Outlook PDF Processor v3.0")
+        self.root.geometry("700x520")
 
         # Get user's display name from Windows
         try:
@@ -86,6 +87,22 @@ class OutlookProcessorGUI:
         )
         self.task2_button.grid(row=0, column=1, padx=10)
 
+        # Task 3 Button
+        self.task3_button = tk.Button(
+            buttons_frame,
+            text="Start Task_3",
+            command=self.start_task_3,
+            font=("Arial", 12, "bold"),
+            bg="#5DADE2",
+            fg="white",
+            width=15,
+            height=1,
+            relief="raised",
+            borderwidth=3,
+            cursor="hand2"
+        )
+        self.task3_button.grid(row=0, column=2, padx=10)
+
         # Log Output Area
         log_label = tk.Label(root, text="Log Output:",
                              font=("Arial", 10, "bold"))
@@ -110,14 +127,16 @@ class OutlookProcessorGUI:
         self.log_text.config(state='disabled')
 
     def disable_buttons(self):
-        """Disable both buttons during processing"""
+        """Disable all buttons during processing"""
         self.task1_button.config(state='disabled')
         self.task2_button.config(state='disabled')
+        self.task3_button.config(state='disabled')
 
     def enable_buttons(self):
-        """Enable both buttons after processing"""
+        """Enable all buttons after processing"""
         self.task1_button.config(state='normal')
         self.task2_button.config(state='normal')
+        self.task3_button.config(state='normal')
 
     def start_task_1(self):
         """Start Task 1 in a separate thread"""
@@ -193,6 +212,66 @@ class OutlookProcessorGUI:
             self.enable_buttons()
             self.task2_button.config(text="Start Task_2")
 
+    def start_task_3(self):
+        """Start Task 3 in a separate thread"""
+        self.disable_buttons()
+        self.task3_button.config(text="Processing...")
+        self.clear_log()
+
+        thread = threading.Thread(target=self.run_task_3)
+        thread.start()
+
+    def run_task_3(self):
+        """Run Task 3 processor"""
+        try:
+            processed, incomplete_combos, missing_field_combos, folder_path = run_task_3(self.log)
+
+            if folder_path is None and processed == 0 and not incomplete_combos:
+                # Task_3 folder missing OR no emails - run_task_3 already logged details
+                messagebox.showwarning(
+                    "Task 3",
+                    "No files were processed.\n\n"
+                    "Either the Task_3 folder is missing from your Inbox or it contains no emails."
+                )
+                return
+
+            if folder_path:
+                os.startfile(folder_path)
+
+            message = f"Processing complete!\n{processed} combo(s) written to the Excel report."
+
+            if incomplete_combos:
+                message += f"\n\n⚠️ {len(incomplete_combos)} incomplete combo(s) skipped:"
+                shown = incomplete_combos[:10]
+                for subj, cid, notes in shown:
+                    short_subj = subj if len(subj) <= 40 else subj[:40] + "..."
+                    message += f"\n  - {short_subj} / {cid}: {', '.join(notes)}"
+                if len(incomplete_combos) > len(shown):
+                    message += f"\n  ...and {len(incomplete_combos) - len(shown)} more (see log)"
+
+            if missing_field_combos:
+                message += (f"\n\n⚠️ {len(missing_field_combos)} combo(s) written but had "
+                            f"field(s) that could not be extracted (marked 'NOT FOUND - check PDF' "
+                            f"in the Excel):")
+                shown = missing_field_combos[:10]
+                for subj, cid, fields in shown:
+                    short_subj = subj if len(subj) <= 40 else subj[:40] + "..."
+                    message += f"\n  - {short_subj} / {cid}: {', '.join(fields)}"
+                if len(missing_field_combos) > len(shown):
+                    message += f"\n  ...and {len(missing_field_combos) - len(shown)} more (see log)"
+
+            message += "\n\nFolder opened."
+
+            messagebox.showinfo("Task 3 Complete", message)
+
+        except Exception as e:
+            self.log(f"\n✗ Error: {e}")
+            messagebox.showerror("Error", f"An error occurred: {e}")
+
+        finally:
+            self.enable_buttons()
+            self.task3_button.config(text="Start Task_3")
+
 
 if __name__ == "__main__":
     # Check if running with GUI
@@ -205,6 +284,11 @@ if __name__ == "__main__":
         # Command line mode - Task 2
         print("Starting Task 2...")
         processed, manual = run_task_2()
+        print("Done!")
+    elif len(sys.argv) > 1 and sys.argv[1] == "--task3":
+        # Command line mode - Task 3
+        print("Starting Task 3...")
+        processed, incomplete, missing_fields, folder = run_task_3()
         print("Done!")
     else:
         # GUI mode (default)
