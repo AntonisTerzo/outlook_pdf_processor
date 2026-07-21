@@ -146,7 +146,7 @@ def process_pdf_task2(temp_pdf_path, output_folder, original_filename):
             has_variofix = check_variofix_in_pdf(temp_pdf_path)
             base_name = original_filename
             if has_variofix:
-                base_name = f"VARIOFIX_{original_filename}"
+                base_name = f"{original_filename}_VARIOFIX"
 
             # Create unique filename if file already exists
             counter = 1
