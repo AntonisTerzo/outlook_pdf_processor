@@ -56,13 +56,9 @@ def process_pdf_task1(temp_pdf_path, output_folder, original_filename):
             # Regular filename for other cities
             new_filename = f"{city}_{doc_number}.pdf"
 
-        # Task 1 does not extract dimensions, but if the PDF mentions
-        # "variofix" the user must be alerted. Prefix the filename so the file
-        # is easy to spot in the folder, and return a flag so the caller can
-        # include it in the completion messagebox.
         has_variofix = check_variofix_in_pdf(temp_pdf_path)
         if has_variofix:
-            new_filename = f"{new_filename}_VARIOFIX"
+            new_filename = new_filename[:-4] + "_VARIOFIX.pdf"
 
         final_path = output_folder / new_filename
         temp_pdf_path.rename(final_path)
