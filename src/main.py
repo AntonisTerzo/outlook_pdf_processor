@@ -150,17 +150,23 @@ class OutlookProcessorGUI:
     def run_task_1(self):
         """Run Task 1 processor"""
         try:
-            processed, manual, folder_path = run_task_1(self.log)
+            processed, manual, folder_path, variofix_files = run_task_1(self.log)
 
             if processed > 0 or manual > 0:
                 # Open the task folder
                 if folder_path:
                     os.startfile(folder_path)
 
-                messagebox.showinfo(
-                    "Task 1 Complete",
-                    f"Processing complete!\n{processed} files processed.\n{manual} need manual review.\n\nFolder opened."
-                )
+                message = (f"Processing complete!\n{processed} files processed."
+                           f"\n{manual} need manual review.")
+                if variofix_files:
+                    message += (f"\n\n⚠️ ATTENTION VARIOFIX DETECTED "
+                                f"in {len(variofix_files)} file(s):")
+                    for filename in variofix_files:
+                        message += f"\n  - {filename}"
+                message += "\n\nFolder opened."
+
+                messagebox.showinfo("Task 1 Complete", message)
             else:
                 messagebox.showwarning("Task 1", "No files were processed.")
 
@@ -184,8 +190,8 @@ class OutlookProcessorGUI:
     def run_task_2(self):
         """Run Task 2 processor"""
         try:
-            processed, manual, folder_path, files_with_warnings = run_task_2(
-                self.log)
+            (processed, manual, folder_path,
+             files_with_warnings, variofix_files) = run_task_2(self.log)
 
             if processed > 0 or manual > 0:
                 # Open the task folder
@@ -197,6 +203,11 @@ class OutlookProcessorGUI:
                 if len(files_with_warnings) > 0:
                     message += f"\n\n⚠️ {len(files_with_warnings)} file(s) had Abmessung sections with no dimensions:"
                     for filename in files_with_warnings:
+                        message += f"\n  - {filename}"
+                if variofix_files:
+                    message += (f"\n\n⚠️ ATTENTION VARIOFIX DETECTED "
+                                f"in {len(variofix_files)} file(s):")
+                    for filename in variofix_files:
                         message += f"\n  - {filename}"
                 message += "\n\nFolder opened."
 
@@ -226,7 +237,7 @@ class OutlookProcessorGUI:
         try:
             processed, incomplete_combos, missing_field_combos, folder_path = run_task_3(self.log)
 
-            if folder_path is None and processed == 0 and not incomplete_combos:
+            if folder_path is None and processed == 0 and not incomplete_combos and not missing_field_combos:
                 # Task_3 folder missing OR no emails - run_task_3 already logged details
                 messagebox.showwarning(
                     "Task 3",
@@ -240,28 +251,18 @@ class OutlookProcessorGUI:
 
             message = f"Processing complete!\n{processed} combo(s) written to the Excel report."
 
-            if incomplete_combos:
-                message += f"\n\n⚠️ {len(incomplete_combos)} incomplete combo(s) skipped:"
-                shown = incomplete_combos[:10]
-                for subj, cid, notes in shown:
-                    short_subj = subj if len(subj) <= 40 else subj[:40] + "..."
-                    message += f"\n  - {short_subj} / {cid}: {', '.join(notes)}"
-                if len(incomplete_combos) > len(shown):
-                    message += f"\n  ...and {len(incomplete_combos) - len(shown)} more (see log)"
-
             if missing_field_combos:
-                message += (f"\n\n⚠️ {len(missing_field_combos)} combo(s) written but had "
-                            f"field(s) that could not be extracted (marked 'NOT FOUND - check PDF' "
-                            f"in the Excel):")
-                shown = missing_field_combos[:10]
-                for subj, cid, fields in shown:
+                message += f"\n\n⚠️ {len(missing_field_combos)} combo(s) written with missing fields (see the red rows / cells in the Excel)."
+
+            if incomplete_combos:
+                message += f"\n\n⚠️ {len(incomplete_combos)} combo(s) skipped (no packing list):"
+                for subj, cid, notes in incomplete_combos[:10]:
                     short_subj = subj if len(subj) <= 40 else subj[:40] + "..."
-                    message += f"\n  - {short_subj} / {cid}: {', '.join(fields)}"
-                if len(missing_field_combos) > len(shown):
-                    message += f"\n  ...and {len(missing_field_combos) - len(shown)} more (see log)"
+                    message += f"\n  - {short_subj} / {cid}"
+                if len(incomplete_combos) > 10:
+                    message += f"\n  ...and {len(incomplete_combos) - 10} more (see log)"
 
             message += "\n\nFolder opened."
-
             messagebox.showinfo("Task 3 Complete", message)
 
         except Exception as e:
@@ -278,17 +279,17 @@ if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--task1":
         # Command line mode - Task 1
         print("Starting Task 1...")
-        processed, manual = run_task_1()
+        run_task_1()
         print("Done!")
     elif len(sys.argv) > 1 and sys.argv[1] == "--task2":
         # Command line mode - Task 2
         print("Starting Task 2...")
-        processed, manual = run_task_2()
+        run_task_2()
         print("Done!")
     elif len(sys.argv) > 1 and sys.argv[1] == "--task3":
         # Command line mode - Task 3
         print("Starting Task 3...")
-        processed, incomplete, missing_fields, folder = run_task_3()
+        run_task_3()
         print("Done!")
     else:
         # GUI mode (default)
