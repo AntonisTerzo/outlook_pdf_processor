@@ -2,7 +2,10 @@ import re
 from pathlib import Path
 from collections import defaultdict, Counter
 from config import TASK2_CITIES, BRASILIEN_SUBCITIES, LYMAN_ELECTRONICS_SUBCITIES, MANUAL_REVIEW_FALLBACK_CITIES
-from pdf_utils import extract_city_from_filename_task2, extract_dimensions_from_pdf, check_city_inside_pdf
+from pdf_utils import (
+    extract_city_from_filename_task2, extract_dimensions_from_pdf,
+    check_city_inside_pdf, check_variofix_in_pdf
+)
 from outlook_utils import (
     connect_to_outlook, find_outlook_folder,
     process_msg_file, initialize_com, uninitialize_com,
@@ -74,7 +77,12 @@ def process_pdf_task2(temp_pdf_path, output_folder, original_filename):
         dimensions_data[city][count] = dimensions
 
         # Create filename: "BRASILIEN INDAIATUBA 1.pdf", "MAXOLUTION 1.pdf", etc.
+        # If the PDF mentions "variofix", prefix the name so the file is easy
+        # to spot in the folder and the user is alerted in the messagebox.
+        has_variofix = check_variofix_in_pdf(temp_pdf_path)
         new_filename = f"{city} {count}.pdf"
+        if has_variofix:
+            new_filename = f"VARIOFIX_{new_filename}"
         final_path = output_folder / new_filename
         temp_pdf_path.rename(final_path)
 
@@ -83,7 +91,12 @@ def process_pdf_task2(temp_pdf_path, output_folder, original_filename):
         if warning:
             message += f" - {warning}"
 
-        return {'success': True, 'message': message}
+        return {
+            'success': True,
+            'message': message,
+            'variofix': has_variofix,
+            'filename': new_filename,
+        }
     else:
         # Manual review - check for fallback cities inside PDF
         fallback_city = check_city_inside_pdf(
@@ -98,7 +111,10 @@ def process_pdf_task2(temp_pdf_path, output_folder, original_filename):
             dimensions, warning = extract_dimensions_from_pdf(temp_pdf_path)
             dimensions_data[fallback_city][count] = dimensions
 
+            has_variofix = check_variofix_in_pdf(temp_pdf_path)
             new_filename = f"{fallback_city} {count}.pdf"
+            if has_variofix:
+                new_filename = f"VARIOFIX_{new_filename}"
             final_path = output_folder / new_filename
             temp_pdf_path.rename(final_path)
 
@@ -107,7 +123,12 @@ def process_pdf_task2(temp_pdf_path, output_folder, original_filename):
             if warning:
                 message += f" - {warning}"
 
-            return {'success': True, 'message': message}
+            return {
+                'success': True,
+                'message': message,
+                'variofix': has_variofix,
+                'filename': new_filename,
+            }
         else:
             # Move to MANUAL REVIEW folder - but still extract dimensions
             manual_folder = output_folder / "MANUAL REVIEW"
@@ -120,12 +141,19 @@ def process_pdf_task2(temp_pdf_path, output_folder, original_filename):
             if dimensions:
                 dimensions_data["MANUAL REVIEW"][original_filename] = dimensions
 
+            # If variofix appears in the PDF, prefix the base filename before
+            # applying collision-avoidance numbering.
+            has_variofix = check_variofix_in_pdf(temp_pdf_path)
+            base_name = original_filename
+            if has_variofix:
+                base_name = f"VARIOFIX_{original_filename}"
+
             # Create unique filename if file already exists
             counter = 1
-            final_path = manual_folder / original_filename
+            final_path = manual_folder / base_name
 
             while final_path.exists():
-                name_without_ext = original_filename.replace(
+                name_without_ext = base_name.replace(
                     '.pdf', '').replace('.PDF', '')
                 final_path = manual_folder / \
                     f"{name_without_ext}({counter}).pdf"
@@ -138,7 +166,12 @@ def process_pdf_task2(temp_pdf_path, output_folder, original_filename):
             if warning:
                 dim_msg += f" - {warning}"
 
-            return {'success': False, 'message': f"Moved to MANUAL REVIEW: {final_path.name}{dim_msg}"}
+            return {
+                'success': False,
+                'message': f"Moved to MANUAL REVIEW: {final_path.name}{dim_msg}",
+                'variofix': has_variofix,
+                'filename': final_path.name,
+            }
 
 
 def create_excel_report(output_folder):
@@ -233,14 +266,14 @@ def run_task_2(log_func=print):
 
         if not task_folder:
             log_func("Error: Task_2 folder not found in Inbox")
-            return 0, 0, None, []
+            return 0, 0, None, [], []
 
         log_func(f"Found folder: {task_folder.Name}")
 
         # Check if there are any emails to process
         if task_folder.Items.Count == 0:
             log_func("\nThere were no emails to process inside Task_2 folder.")
-            return 0, 0, None, []
+            return 0, 0, None, [], []
 
         log_func(f"Processing {task_folder.Items.Count} emails\n")
 
@@ -256,6 +289,7 @@ def run_task_2(log_func=print):
         total_processed_count = 0
         total_manual_review_count = 0
         files_with_warnings = []
+        variofix_files = []  # final filenames of any PDFs containing "variofix"
 
         # Process each email - each gets its own subfolder
         for message in task_folder.Items:
@@ -291,12 +325,13 @@ def run_task_2(log_func=print):
                         temp_msg_path = temp_folder / filename
                         attachment.SaveAsFile(str(temp_msg_path))
 
-                        msg_processed, msg_manual = process_msg_file(
+                        msg_processed, msg_manual, msg_variofix = process_msg_file(
                             temp_msg_path, temp_folder, email_folder, outlook,
                             process_pdf_task2, log_func
                         )
                         processed_count += msg_processed
                         manual_review_count += msg_manual
+                        variofix_files.extend(msg_variofix)
 
                         temp_msg_path.unlink()
 
@@ -332,6 +367,10 @@ def run_task_2(log_func=print):
                                         'Saved as: ')[1].split(' (')[0]
                                 files_with_warnings.append(saved_filename)
 
+                        if result.get('variofix') and result.get('filename'):
+                            log_func(f"  ATTENTION VARIOFIX DETECTED in {result['filename']}")
+                            variofix_files.append(result['filename'])
+
                 # Create Excel for this email if ANY files were processed OR have dimensions
                 if processed_count > 0 or dimensions_data:
                     log_func("\nCreating Excel report for this email...")
@@ -362,13 +401,13 @@ def run_task_2(log_func=print):
             if not remaining_files:
                 temp_folder.rmdir()
 
-        return total_processed_count, total_manual_review_count, pdf_folder, files_with_warnings
+        return total_processed_count, total_manual_review_count, pdf_folder, files_with_warnings, variofix_files
 
     except Exception as e:
         log_func(f"\nError: {e}")
         import traceback
         traceback.print_exc()
-        return 0, 0, None, []
+        return 0, 0, None, [], []
 
     finally:
         uninitialize_com()
