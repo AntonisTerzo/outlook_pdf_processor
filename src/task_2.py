@@ -82,7 +82,7 @@ def process_pdf_task2(temp_pdf_path, output_folder, original_filename):
         has_variofix = check_variofix_in_pdf(temp_pdf_path)
         new_filename = f"{city} {count}.pdf"
         if has_variofix:
-            new_filename = f"VARIOFIX_{new_filename}"
+            new_filename = f"{city} {count} VARIOFIX.pdf"
         final_path = output_folder / new_filename
         temp_pdf_path.rename(final_path)
 
@@ -114,7 +114,7 @@ def process_pdf_task2(temp_pdf_path, output_folder, original_filename):
             has_variofix = check_variofix_in_pdf(temp_pdf_path)
             new_filename = f"{fallback_city} {count}.pdf"
             if has_variofix:
-                new_filename = f"VARIOFIX_{new_filename}"
+                new_filename = f"{fallback_city} {count} VARIOFIX.pdf"
             final_path = output_folder / new_filename
             temp_pdf_path.rename(final_path)
 
@@ -146,7 +146,8 @@ def process_pdf_task2(temp_pdf_path, output_folder, original_filename):
             has_variofix = check_variofix_in_pdf(temp_pdf_path)
             base_name = original_filename
             if has_variofix:
-                base_name = f"{original_filename}_VARIOFIX"
+                stem = original_filename[:-4] if original_filename.lower().endswith('.pdf') else original_filename
+                base_name = f"{stem}_VARIOFIX.pdf"
 
             # Create unique filename if file already exists
             counter = 1
