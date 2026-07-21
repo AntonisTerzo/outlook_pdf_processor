@@ -62,7 +62,7 @@ def process_pdf_task1(temp_pdf_path, output_folder, original_filename):
         # include it in the completion messagebox.
         has_variofix = check_variofix_in_pdf(temp_pdf_path)
         if has_variofix:
-            new_filename = f"VARIOFIX_{new_filename}"
+            new_filename = f"{new_filename}_VARIOFIX"
 
         final_path = output_folder / new_filename
         temp_pdf_path.rename(final_path)
