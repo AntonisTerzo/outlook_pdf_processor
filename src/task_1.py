@@ -1,7 +1,10 @@
 from pathlib import Path
 import re
 from config import TASK1_CITIES
-from pdf_utils import extract_info_from_pdf_task1, extract_versand_for_tianjin, check_motors_in_warenempfanger
+from pdf_utils import (
+    extract_info_from_pdf_task1, extract_versand_for_tianjin,
+    check_motors_in_warenempfanger, check_variofix_in_pdf
+)
 from outlook_utils import (
     connect_to_outlook, find_outlook_folder,
     process_msg_file, initialize_com, uninitialize_com,
@@ -53,9 +56,22 @@ def process_pdf_task1(temp_pdf_path, output_folder, original_filename):
             # Regular filename for other cities
             new_filename = f"{city}_{doc_number}.pdf"
 
+        # Task 1 does not extract dimensions, but if the PDF mentions
+        # "variofix" the user must be alerted. Prefix the filename so the file
+        # is easy to spot in the folder, and return a flag so the caller can
+        # include it in the completion messagebox.
+        has_variofix = check_variofix_in_pdf(temp_pdf_path)
+        if has_variofix:
+            new_filename = f"VARIOFIX_{new_filename}"
+
         final_path = output_folder / new_filename
         temp_pdf_path.rename(final_path)
-        return {'success': True, 'message': f"Saved as: {new_filename}"}
+        return {
+            'success': True,
+            'message': f"Saved as: {new_filename}",
+            'variofix': has_variofix,
+            'filename': new_filename,
+        }
     else:
         # Move to MANUAL REVIEW folder with unique name
         manual_folder = output_folder / "MANUAL REVIEW"
@@ -71,8 +87,17 @@ def process_pdf_task1(temp_pdf_path, output_folder, original_filename):
             final_path = manual_folder / f"{name_without_ext}({counter}).pdf"
             counter += 1
 
+        # Manual-review files also get the variofix check so the user is
+        # alerted even for files that couldn't be renamed automatically.
+        has_variofix = check_variofix_in_pdf(temp_pdf_path)
+
         temp_pdf_path.rename(final_path)
-        return {'success': False, 'message': f"Moved to MANUAL REVIEW: {final_path.name}"}
+        return {
+            'success': False,
+            'message': f"Moved to MANUAL REVIEW: {final_path.name}",
+            'variofix': has_variofix,
+            'filename': final_path.name,
+        }
 
 
 def run_task_1(log_func=print):
@@ -92,14 +117,14 @@ def run_task_1(log_func=print):
 
         if not task_folder:
             log_func("Error: Task_1 folder not found in Inbox")
-            return 0, 0, None
+            return 0, 0, None, []
 
         log_func(f"Found folder: {task_folder.Name}")
 
         # Check if there are any emails to process
         if task_folder.Items.Count == 0:
             log_func("\nThere were no emails to process inside Task_1 folder.")
-            return 0, 0, None
+            return 0, 0, None, []
 
         log_func(f"Processing {task_folder.Items.Count} emails\n")
 
@@ -114,6 +139,7 @@ def run_task_1(log_func=print):
 
         total_processed_count = 0
         total_manual_review_count = 0
+        variofix_files = []  # final filenames of any PDFs containing "variofix"
 
         # Process each email - each gets its own subfolder
         for message in task_folder.Items:
@@ -146,12 +172,13 @@ def run_task_1(log_func=print):
                         temp_msg_path = temp_folder / filename
                         attachment.SaveAsFile(str(temp_msg_path))
 
-                        msg_processed, msg_manual = process_msg_file(
+                        msg_processed, msg_manual, msg_variofix = process_msg_file(
                             temp_msg_path, temp_folder, email_folder, outlook,
                             process_pdf_task1, log_func
                         )
                         processed_count += msg_processed
                         manual_review_count += msg_manual
+                        variofix_files.extend(msg_variofix)
 
                         temp_msg_path.unlink()
 
@@ -170,6 +197,10 @@ def run_task_1(log_func=print):
                         else:
                             log_func(result['message'])
                             manual_review_count += 1
+
+                        if result.get('variofix') and result.get('filename'):
+                            log_func(f"  ATTENTION VARIOFIX DETECTED in {result['filename']}")
+                            variofix_files.append(result['filename'])
 
                 log_func(
                     f"Email '{email_subject}': {processed_count} processed, {manual_review_count} need review")
@@ -194,11 +225,11 @@ def run_task_1(log_func=print):
             if not remaining_files:
                 temp_folder.rmdir()
 
-        return total_processed_count, total_manual_review_count, pdf_folder
+        return total_processed_count, total_manual_review_count, pdf_folder, variofix_files
 
     except Exception as e:
         log_func(f"\nError: {e}")
-        return 0, 0, None
+        return 0, 0, None, []
 
     finally:
         uninitialize_com()
