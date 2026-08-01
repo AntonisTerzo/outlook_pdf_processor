@@ -2,7 +2,6 @@ import win32com.client
 import pythoncom
 from pathlib import Path
 
-
 def create_unique_folder(base_path, folder_name):
     """
     Create a unique folder. If folder exists, add (1), (2), etc.
@@ -27,7 +26,6 @@ def create_unique_folder(base_path, folder_name):
 
         counter += 1
 
-
 def connect_to_outlook():
     """
     Connect to Outlook application.
@@ -41,7 +39,6 @@ def connect_to_outlook():
 
     namespace = outlook.GetNamespace("MAPI")
     return outlook, namespace
-
 
 def find_outlook_folder(namespace, folder_name):
     """
@@ -57,12 +54,13 @@ def find_outlook_folder(namespace, folder_name):
 
     return None
 
-
 def process_msg_file(msg_path, temp_folder, output_folder, outlook, process_pdf_func, log_func=print):
     """
     Open a .msg file and extract PDFs from it.
     Uses the provided process_pdf_func to handle each PDF.
-    Returns: (processed_count, manual_review_count)
+    Returns: (processed_count, manual_review_count, variofix_files)
+    where variofix_files is a list of the final filenames of any PDFs found
+    to contain "variofix" (empty list when none).
     """
     try:
         namespace = outlook.GetNamespace("MAPI")
@@ -71,6 +69,7 @@ def process_msg_file(msg_path, temp_folder, output_folder, outlook, process_pdf_
         log_func(f"  Opening .msg file: {msg_path.name}")
         processed = 0
         manual_review = 0
+        variofix_files = []
 
         if msg.Attachments.Count > 0:
             log_func(
@@ -92,23 +91,26 @@ def process_msg_file(msg_path, temp_folder, output_folder, outlook, process_pdf_
                     else:
                         log_func(f"     {result['message']}")
                         manual_review += 1
+
+                    # Collect variofix hit (works for either success/manual).
+                    if result.get('variofix') and result.get('filename'):
+                        variofix_files.append(result['filename'])
                 else:
                     log_func(f"    Skipping non-PDF: {attachment.FileName}")
         else:
             log_func(f"    No attachments found in .msg file")
 
-        return processed, manual_review
+        return processed, manual_review, variofix_files
 
     except Exception as e:
         log_func(f"  Error processing .msg file: {e}")
-        return 0, 0
-
+        return 0, 0, []
 
 def initialize_com():
     """Initialize COM for the current thread."""
     pythoncom.CoInitialize()
 
-
 def uninitialize_com():
     """Uninitialize COM for the current thread."""
     pythoncom.CoUninitialize()
+    
