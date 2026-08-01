@@ -133,7 +133,7 @@ City lists and Task 3 file-type identifiers live in `src/config.py`:
 ## Project structure
 
 ```
-your-repo/
+repo/
 ├── .github/
 │   └── workflows/
 │       └── build.yml          # Builds the EXE on push (PyInstaller)
