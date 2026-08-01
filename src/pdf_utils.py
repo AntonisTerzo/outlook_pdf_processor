@@ -1,7 +1,6 @@
 import re
 from pypdf import PdfReader
 
-
 def extract_versand_for_tianjin(pdf_path):
     """
     Extract Versand value specifically for TIANJIN city.
@@ -68,6 +67,28 @@ def check_motors_in_warenempfanger(pdf_path):
             return False
     except Exception as e:
         print(f"Error checking Motors for SUZHOU: {e}")
+        return False
+
+
+def check_variofix_in_pdf(pdf_path):
+    """
+    Check whether the word "variofix" appears anywhere in the PDF text.
+    Used by both Task 1 and Task 2 to flag files that need attention:
+    - Task 1 prefixes the renamed file with "VARIOFIX_".
+    - Task 2 already substitutes fixed dimensions "36x23x19" for variofix
+      entries in its Excel report, and also prefixes the renamed file.
+    Returns True if "variofix" is found, False otherwise.
+    """
+    try:
+        with open(pdf_path, 'rb') as file:
+            pdf_reader = PdfReader(file)
+            for page in pdf_reader.pages:
+                page_text = page.extract_text() or ""
+                if 'variofix' in page_text.lower():
+                    return True
+            return False
+    except Exception as e:
+        print(f"Error checking variofix: {e}")
         return False
 
 
