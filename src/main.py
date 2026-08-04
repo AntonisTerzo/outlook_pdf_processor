@@ -15,7 +15,7 @@ from task_3 import run_task_3
 class OutlookProcessorGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("Outlook PDF Processor v3.0")
+        self.root.title("Outlook PDF Processor")
         self.root.geometry("700x520")
 
         # Get user's display name from Windows
@@ -249,7 +249,8 @@ class OutlookProcessorGUI:
             if folder_path:
                 os.startfile(folder_path)
 
-            message = f"Processing complete!\n{processed} combo(s) written to the Excel report."
+            message = (f"Processing complete!\n{processed} combo(s) written to the Excel report."
+                       f"\nThe PDFs that were read are saved in one folder per email.")
 
             if missing_field_combos:
                 message += f"\n\n⚠️ {len(missing_field_combos)} combo(s) written with missing fields (see the red rows / cells in the Excel)."

@@ -35,7 +35,6 @@ A small Python utility that automates repetitive team tasks around PDF attachmen
 - Each email contains one or more **combos** of shipment documents that share a number in their filenames (e.g. `...651515...`). A combo consists of:
   - `LISTA DE CONTENIDO / PACKING LIST`
   - `PARTIDAS ESTADÍSTICAS / CUSTOMS CODE`
-  - (`FACTURA / INVOICE` files are ignored)
 - File types are detected from the **content** of each PDF, and tables are parsed with `pdfplumber` for reliable cell-level extraction.
 - Produces one consolidated `Task_3_Report.xlsx` in Downloads with **one row per combo** and 9 columns:
 

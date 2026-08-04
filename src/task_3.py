@@ -101,10 +101,16 @@ def _group_combos(pdfs, log_func):
     Group (filename, bytes) PDFs by combo id (longest digit run in filename),
     detecting each file's type. The invoice file maps to None and is skipped.
 
-    Returns dict:
-        {combo_id: {"PACKING_LIST": bytes|None, "CUSTOMS_CODE": bytes|None}}
+    Returns (combos, used_files):
+        combos    -> {combo_id: {"PACKING_LIST": bytes|None,
+                                 "CUSTOMS_CODE": bytes|None}}
+        used_files-> [(filename, bytes)] for the files actually used, i.e. only
+                     the PACKING_LIST / CUSTOMS_CODE pairs we read. These are
+                     the files that get saved to disk; invoices, unrecognised
+                     files and dropped duplicates are not included.
     """
     combos = defaultdict(lambda: {"PACKING_LIST": None, "CUSTOMS_CODE": None})
+    used_files = []
 
     for filename, data in pdfs:
         combo_id = extract_combo_id_from_filename(filename)
@@ -120,11 +126,62 @@ def _group_combos(pdfs, log_func):
 
         if combos[combo_id][file_type] is None:
             combos[combo_id][file_type] = data
+            used_files.append((filename, data))
             log_func(f"  {filename} -> combo {combo_id} / {file_type}")
         else:
             log_func(f"  ! Duplicate {file_type} in combo {combo_id}: {filename} (keeping first)")
 
-    return combos
+    return combos, used_files
+
+
+def _sanitize_folder_name(subject):
+    """
+    Turn an email subject into a safe Windows folder name: strip characters
+    Windows forbids, collapse whitespace and cap the length.
+    """
+    name = re.sub(r'[<>:"/\\|?*]', '', subject or "")
+    name = re.sub(r'\s+', ' ', name).strip()
+    # Windows also refuses names ending in a dot or space.
+    name = name.rstrip('. ')
+    if len(name) > 100:
+        name = name[:100].rstrip('. ')
+    return name or "No_Subject"
+
+
+def _save_email_pdfs(output_folder, subject, used_files, log_func):
+    """
+    Save the PDFs we actually read for one email into its own folder inside
+    output_folder. Returns the folder path, or None if nothing was saved.
+    """
+    if not used_files:
+        return None
+
+    email_folder = create_unique_folder(
+        output_folder, _sanitize_folder_name(subject))
+
+    saved = 0
+    seen_names = {}
+    for filename, data in used_files:
+        target = Path(filename).name
+        # Two attachments in the same email can share a name (e.g. one nested
+        # in a .msg): keep both by suffixing the later ones.
+        if target in seen_names:
+            seen_names[target] += 1
+            stem = Path(target).stem
+            suffix = Path(target).suffix
+            target = f"{stem}_{seen_names[target]}{suffix}"
+        else:
+            seen_names[target] = 0
+
+        try:
+            with open(email_folder / target, "wb") as f:
+                f.write(data)
+            saved += 1
+        except Exception as e:
+            log_func(f"  ! Could not save {target}: {e}")
+
+    log_func(f"  Saved {saved} PDF(s) to: {email_folder}")
+    return email_folder
 
 
 def _build_combo_row(combo_id, combo_files, mail_description, log_func):
@@ -287,12 +344,14 @@ def run_task_3(log_func=print):
     """
     Task 3:
     - Connect to Outlook, find Inbox/Task_3 folder (notify if missing).
-    - Read all PDF attachments into memory (PDFs are NOT downloaded/saved).
+    - Read all PDF attachments into memory.
     - Group PDFs into combos by the longest digit-run in their filename.
     - Each combo needs PACKING_LIST + CUSTOMS_CODE (invoice is ignored).
+    - Save the PACKING_LIST / CUSTOMS_CODE PDFs we read into a per-email
+      subfolder of the output folder (other attachments are not saved).
     - Extract data and write one consolidated Task_3_Report.xlsx to Downloads.
     Returns: (processed_count, incomplete_combos, combos_with_missing_fields,
-              excel_folder_path)
+              output_folder_path)
     """
     initialize_com()
     # Route low-level extraction diagnostics (ambiguous/missing values) into
@@ -322,6 +381,19 @@ def run_task_3(log_func=print):
         combos_with_missing_fields = []  # list of (email_subject, combo_id, missing_fields)
         total_processed = 0
 
+        # The output folder in Downloads holds one subfolder per email plus the
+        # final Excel. It is created lazily so nothing is left behind when
+        # there is nothing to save.
+        output_folder = None
+
+        def get_output_folder():
+            nonlocal output_folder
+            if output_folder is None:
+                downloads = Path.home() / "Downloads"
+                output_folder = create_unique_folder(
+                    downloads, "outlook_pdf_processor_task_3")
+            return output_folder
+
         for message in task_folder.Items:
             if not (hasattr(message, 'Attachments') and message.Attachments.Count > 0):
                 continue
@@ -340,7 +412,12 @@ def run_task_3(log_func=print):
                 log_func("  No PDF attachments found in this email")
                 continue
 
-            combos = _group_combos(pdfs, log_func)
+            combos, used_files = _group_combos(pdfs, log_func)
+
+            # Save only the pairs we read (packing list / customs code).
+            if used_files:
+                _save_email_pdfs(get_output_folder(), subject_raw,
+                                 used_files, log_func)
 
             for combo_id, files in combos.items():
                 row, notes, missing_fields = _build_combo_row(
@@ -357,21 +434,18 @@ def run_task_3(log_func=print):
                     all_rows.append(row)
                     total_processed += 1
 
-        # Write the consolidated Excel to Downloads
-        excel_folder = None
+        # Write the consolidated Excel next to the saved email folders
         if all_rows:
-            downloads = Path.home() / "Downloads"
-            excel_folder = create_unique_folder(downloads, "outlook_pdf_processor_task_3")
             log_func("\nCreating Excel report...")
-            excel_path = _create_excel_report(all_rows, excel_folder)
+            excel_path = _create_excel_report(all_rows, get_output_folder())
             if excel_path:
                 log_func(f"Excel report created: {excel_path}")
 
         log_func("\n" + "=" * 60)
         log_func("Task 3 Processing complete")
         log_func(f"{total_processed} combo(s) written to Excel")
-        if excel_folder:
-            log_func(f"Location: {excel_folder}")
+        if output_folder:
+            log_func(f"Location: {output_folder}")
         if incomplete_combos:
             log_func(f"\nWARNING: {len(incomplete_combos)} incomplete combo(s) (skipped):")
             for subj, cid, notes in incomplete_combos:
@@ -382,7 +456,7 @@ def run_task_3(log_func=print):
                 log_func(f"  - {subj} / combo {cid}: {', '.join(fields)}")
         log_func("=" * 60)
 
-        return total_processed, incomplete_combos, combos_with_missing_fields, excel_folder
+        return total_processed, incomplete_combos, combos_with_missing_fields, output_folder
 
     except Exception as e:
         log_func(f"\nError: {e}")
