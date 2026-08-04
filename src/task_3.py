@@ -134,12 +134,12 @@ def _group_combos(pdfs, log_func):
     return combos, used_files
 
 
-def _sanitize_folder_name(subject):
+def _sanitize_folder_name(text):
     """
-    Turn an email subject into a safe Windows folder name: strip characters
-    Windows forbids, collapse whitespace and cap the length.
+    Turn a string into a safe Windows folder name: strip characters Windows
+    forbids, collapse whitespace and cap the length.
     """
-    name = re.sub(r'[<>:"/\\|?*]', '', subject or "")
+    name = re.sub(r'[<>:"/\\|?*]', '', text or "")
     name = re.sub(r'\s+', ' ', name).strip()
     # Windows also refuses names ending in a dot or space.
     name = name.rstrip('. ')
@@ -148,16 +148,17 @@ def _sanitize_folder_name(subject):
     return name or "No_Subject"
 
 
-def _save_email_pdfs(output_folder, subject, used_files, log_func):
+def _save_email_pdfs(output_folder, folder_label, used_files, log_func):
     """
     Save the PDFs we actually read for one email into its own folder inside
-    output_folder. Returns the folder path, or None if nothing was saved.
+    output_folder. folder_label is the email's Cargo Description (Mail) value.
+    Returns the folder path, or None if nothing was saved.
     """
     if not used_files:
         return None
 
     email_folder = create_unique_folder(
-        output_folder, _sanitize_folder_name(subject))
+        output_folder, _sanitize_folder_name(folder_label))
 
     saved = 0
     seen_names = {}
@@ -348,7 +349,8 @@ def run_task_3(log_func=print):
     - Group PDFs into combos by the longest digit-run in their filename.
     - Each combo needs PACKING_LIST + CUSTOMS_CODE (invoice is ignored).
     - Save the PACKING_LIST / CUSTOMS_CODE PDFs we read into a per-email
-      subfolder of the output folder (other attachments are not saved).
+      subfolder named after the Cargo Description (Mail) value (other
+      attachments are not saved).
     - Extract data and write one consolidated Task_3_Report.xlsx to Downloads.
     Returns: (processed_count, incomplete_combos, combos_with_missing_fields,
               output_folder_path)
@@ -414,9 +416,13 @@ def run_task_3(log_func=print):
 
             combos, used_files = _group_combos(pdfs, log_func)
 
-            # Save only the pairs we read (packing list / customs code).
+            # Save only the pairs we read (packing list / customs code), in a
+            # folder named after the Cargo Description (Mail). If that could
+            # not be extracted, fall back to the subject so the files are
+            # still findable.
             if used_files:
-                _save_email_pdfs(get_output_folder(), subject_raw,
+                _save_email_pdfs(get_output_folder(),
+                                 mail_description or subject_raw,
                                  used_files, log_func)
 
             for combo_id, files in combos.items():

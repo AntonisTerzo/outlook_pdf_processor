@@ -31,10 +31,11 @@ A small Python utility that automates repetitive team tasks around PDF attachmen
 - Unmatched files are moved to a **MANUAL REVIEW** subfolder.
 
 **Task 3 — Extract shipment data into a consolidated Excel report**
-- Reads PDF attachments from the **Task_3** Outlook folder **in memory** — nothing is downloaded except the final report.
+- Reads PDF attachments from the **Task_3** Outlook folder (including PDFs nested inside `.msg` files).
 - Each email contains one or more **combos** of shipment documents that share a number in their filenames (e.g. `...651515...`). A combo consists of:
   - `LISTA DE CONTENIDO / PACKING LIST`
   - `PARTIDAS ESTADÍSTICAS / CUSTOMS CODE`
+- Each email gets its **own subfolder** next to the report, named after its **Cargo Description (Mail)** value (falling back to the email subject when that can't be extracted), holding the PDFs that were actually read — only the packing-list / customs-code pairs. Invoices and unrecognised attachments are not saved.
 - File types are detected from the **content** of each PDF, and tables are parsed with `pdfplumber` for reliable cell-level extraction.
 - Produces one consolidated `Task_3_Report.xlsx` in Downloads with **one row per combo** and 9 columns:
 
@@ -116,11 +117,12 @@ Or use the prebuilt `outlook_pdf_processor.exe` (built automatically by GitHub A
 
 ### Task 3
 1. Connects to Outlook using `pywin32` MAPI and opens the **Task_3** folder (notifies the user if it doesn't exist or is empty).
-2. Reads every PDF attachment into memory (including PDFs nested inside `.msg` files) — the PDFs themselves are never saved to disk.
+2. Reads every PDF attachment into memory (including PDFs nested inside `.msg` files).
 3. Groups PDFs into **combos** by the longest digit run in their filenames, and detects each file's type from its content.
-4. Parses the packing list with `pdfplumber` (table-aware extraction): descriptions from the `Descripción` column, summary values (PCS/KG/M3) line-by-line from the `RESUMEN / SUMMARY` block, dimensions with duplicate counting, and the IV/SRN reference numbers.
-5. Extracts HS codes from the customs-code file and strips the dots.
-6. Writes one consolidated `Task_3_Report.xlsx` to a unique folder in Downloads, with red shading for any missing data, and opens the folder.
+4. Saves the packing-list / customs-code PDFs it read into a subfolder named after the email's Cargo Description (Mail); duplicate names get a `(1)`, `(2)`, … suffix. Invoices and unrecognised attachments are discarded.
+5. Parses the packing list with `pdfplumber` (table-aware extraction): descriptions from the `Descripción` column, summary values (PCS/KG/M3) line-by-line from the `RESUMEN / SUMMARY` block, dimensions with duplicate counting, and the IV/SRN reference numbers.
+6. Extracts HS codes from the customs-code file and strips the dots.
+7. Writes one consolidated `Task_3_Report.xlsx` alongside the email subfolders in a unique Downloads folder, with red shading for any missing data, and opens the folder.
 
 ## Configuration
 
