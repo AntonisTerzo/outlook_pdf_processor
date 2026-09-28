@@ -348,9 +348,8 @@ def run_task_3(log_func=print):
     - Read all PDF attachments into memory.
     - Group PDFs into combos by the longest digit-run in their filename.
     - Each combo needs PACKING_LIST + CUSTOMS_CODE (invoice is ignored).
-    - Save the PACKING_LIST / CUSTOMS_CODE PDFs we read into a per-email
-      subfolder named after the Cargo Description (Mail) value (other
-      attachments are not saved).
+    - Save the PACKING_LIST / CUSTOMS_CODE / INVOICES PDFs we read into a per-email
+      subfolder named after the Cargo Description (Mail) value.
     - Extract data and write one consolidated Task_3_Report.xlsx to Downloads.
     Returns: (processed_count, incomplete_combos, combos_with_missing_fields,
               output_folder_path)
@@ -416,14 +415,14 @@ def run_task_3(log_func=print):
 
             combos, used_files = _group_combos(pdfs, log_func)
 
-            # Save only the pairs we read (packing list / customs code), in a
-            # folder named after the Cargo Description (Mail). If that could
-            # not be extracted, fall back to the subject so the files are
-            # still findable.
-            if used_files:
+            # Save ALL the PDFs found in this email (invoice, packing list,
+            # customs code), in a folder named after the Cargo Description
+            # (Mail). If that could not be extracted, fall back to the subject
+            # so the files are still findable.
+            if pdfs:
                 _save_email_pdfs(get_output_folder(),
                                  mail_description or subject_raw,
-                                 used_files, log_func)
+                                 pdfs, log_func)
 
             for combo_id, files in combos.items():
                 row, notes, missing_fields = _build_combo_row(
@@ -473,3 +472,4 @@ def run_task_3(log_func=print):
     finally:
         set_extraction_logger(_previous_logger)
         uninitialize_com()
+        
